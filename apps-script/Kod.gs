@@ -47,6 +47,30 @@ const PLAN_ROWS = [
   ['Nogi','Wspięcia na palce stojąc','3','12-15','1:00']
 ];
 
+
+/* Formuły piszemy po angielsku (przecinki); przy polskich ustawieniach arkusza
+   zamieniamy separatory: argumenty ";" , kolumny w {} "\\" , ułamki ",". */
+let FX_COMMA_ = null;
+function fx_(f) {
+  if (FX_COMMA_ === null) {
+    const loc = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetLocale() || 'en_US';
+    FX_COMMA_ = !/^(en|ja|zh|ko|he|th)/.test(loc);
+  }
+  if (!FX_COMMA_) return f;
+  let out = '', q = false; const st = [];
+  for (let i = 0; i < f.length; i++) {
+    const ch = f[i];
+    if (ch === '"') { q = !q; out += ch; continue; }
+    if (q) { out += ch; continue; }
+    if (ch === '{' || ch === '(') st.push(ch);
+    if (ch === '}' || ch === ')') st.pop();
+    if (ch === ',') { out += st[st.length - 1] === '{' ? '\\' : ';'; continue; }
+    if (ch === '.' && /\d/.test(f[i - 1] || '') && /\d/.test(f[i + 1] || '')) { out += ','; continue; }
+    out += ch;
+  }
+  return out;
+}
+
 /* ================= MENU ================= */
 function onOpen() {
   SpreadsheetApp.getUi().createMenu('Fitness')
@@ -147,11 +171,11 @@ function buildPlan_(ss) {
 function buildWeeks_(ss) {
   const sh = sheet_(ss, SH.WEEK);
   sh.clear();
-  sh.getRange('A1').setFormula(
+  sh.getRange('A1').setFormula(fx_(
     '=IFERROR(QUERY({ARRAYFORMULA(IF(Treningi!B2:B="",,INT(Treningi!B2:B)-WEEKDAY(Treningi!B2:B,2)+1)),Treningi!G2:G,Treningi!H2:H},' +
     '"select Col1, count(Col1), sum(Col2), sum(Col3) where Col1 is not null group by Col1 order by Col1 ' +
     'label Col1 \'Tydzień od\', count(Col1) \'Treningi\', sum(Col2) \'Serie\', sum(Col3) \'Objętość (kg)\'",0),' +
-    '{"Tydzień od","Treningi","Serie","Objętość (kg)"})');
+    '{"Tydzień od","Treningi","Serie","Objętość (kg)"})'));
   sh.getRange('A2:A').setNumberFormat('d mmm');
   sh.getRange('D2:D').setNumberFormat('#,##0');
   sh.getRange('A1:D1').setBackground(C.head).setFontColor(C.headTxt).setFontWeight('bold');
@@ -163,12 +187,12 @@ function buildDiet_(ss) {
   sh.clear(); sh.getBandings().forEach(b => b.remove());
   sh.getRange(1, 1, 1, 6).setValues([['Data','Zjedzone kcal','Białko (g)','Catering (plan kcal)','Dodatkowe kcal','Cel kcal']])
     .setBackground(C.head).setFontColor(C.headTxt).setFontWeight('bold');
-  sh.getRange('A2').setFormula('=IFERROR(SORT(UNIQUE(FILTER({Catering!A2:A;Jedzenie!B2:B},{Catering!A2:A;Jedzenie!B2:B}<>""))),)');
-  sh.getRange('B2').setFormula('=MAP(A2:A,LAMBDA(d,IF(d="",,SUMIFS(Catering!D2:D,Catering!A2:A,d,Catering!H2:H,TRUE)+SUMIFS(Jedzenie!G2:G,Jedzenie!B2:B,d))))');
-  sh.getRange('C2').setFormula('=MAP(A2:A,LAMBDA(d,IF(d="",,SUMIFS(Catering!E2:E,Catering!A2:A,d,Catering!H2:H,TRUE)+SUMIFS(Jedzenie!H2:H,Jedzenie!B2:B,d))))');
-  sh.getRange('D2').setFormula('=MAP(A2:A,LAMBDA(d,IF(d="",,SUMIFS(Catering!D2:D,Catering!A2:A,d))))');
-  sh.getRange('E2').setFormula('=MAP(A2:A,LAMBDA(d,IF(d="",,SUMIFS(Jedzenie!G2:G,Jedzenie!B2:B,d))))');
-  sh.getRange('F2').setFormula('=MAP(A2:A,LAMBDA(d,IF(d="",,3000)))');
+  sh.getRange('A2').setFormula(fx_('=IFERROR(SORT(UNIQUE(FILTER({Catering!A2:A;Jedzenie!B2:B},{Catering!A2:A;Jedzenie!B2:B}<>""))),)'));
+  sh.getRange('B2').setFormula(fx_('=MAP(A2:A,LAMBDA(d,IF(d="",,SUMIFS(Catering!D2:D,Catering!A2:A,d,Catering!H2:H,TRUE)+SUMIFS(Jedzenie!G2:G,Jedzenie!B2:B,d))))'));
+  sh.getRange('C2').setFormula(fx_('=MAP(A2:A,LAMBDA(d,IF(d="",,SUMIFS(Catering!E2:E,Catering!A2:A,d,Catering!H2:H,TRUE)+SUMIFS(Jedzenie!H2:H,Jedzenie!B2:B,d))))'));
+  sh.getRange('D2').setFormula(fx_('=MAP(A2:A,LAMBDA(d,IF(d="",,SUMIFS(Catering!D2:D,Catering!A2:A,d))))'));
+  sh.getRange('E2').setFormula(fx_('=MAP(A2:A,LAMBDA(d,IF(d="",,SUMIFS(Jedzenie!G2:G,Jedzenie!B2:B,d))))'));
+  sh.getRange('F2').setFormula(fx_('=MAP(A2:A,LAMBDA(d,IF(d="",,3000)))'));
   sh.getRange('A2:A').setNumberFormat('ddd d mmm');
   sh.getRange('B2:F').setNumberFormat('0');
   sh.setColumnWidths(1, 6, 140);
@@ -179,10 +203,10 @@ function buildDiet_(ss) {
 function buildRecords_(ss) {
   const sh = sheet_(ss, SH.REC);
   sh.clear();
-  sh.getRange('A1').setFormula(
+  sh.getRange('A1').setFormula(fx_(
     '=IFERROR(QUERY(Serie!A2:J,"select D, max(H), max(F), count(D), max(B) where D is not null group by D order by max(H) desc ' +
     'label D \'Ćwiczenie\', max(H) \'Najlepszy e1RM\', max(F) \'Max ciężar\', count(D) \'Serie łącznie\', max(B) \'Ostatnio\'",0),' +
-    '{"Ćwiczenie","Najlepszy e1RM","Max ciężar","Serie łącznie","Ostatnio"})');
+    '{"Ćwiczenie","Najlepszy e1RM","Max ciężar","Serie łącznie","Ostatnio"})'));
   sh.getRange('A1:E1').setBackground(C.head).setFontColor(C.headTxt).setFontWeight('bold');
   sh.getRange('B2:C').setNumberFormat('0.0" kg"');
   sh.getRange('E2:E').setNumberFormat('d mmm yyyy');
@@ -204,7 +228,7 @@ function buildDashboard_(ss, sh) {
 
   // nagłówek
   sh.getRange('B2:K2').merge().setValue('ŻELAZNY DZIENNIK').setFontFamily('Roboto Condensed').setFontSize(26).setFontWeight('bold').setFontColor(C.head);
-  sh.getRange('B3:K3').merge().setFormula('="Masa: "&IFERROR(TEXT(B6,"0.0"),"–")&" → cel "&TEXT(K5,"0.0")&" kg  ·  aktualizacja "&TEXT(NOW(),"d mmm yyyy, HH:mm")')
+  sh.getRange('B3:K3').merge().setFormula(fx_('="Masa: "&IFERROR(TEXT(B6,"0.0"),"–")&" → cel "&TEXT(K5,"0.0")&" kg  ·  aktualizacja "&TEXT(NOW(),"d mmm yyyy, HH:mm")'))
     .setFontColor(C.muted).setFontSize(10);
   sh.setRowHeight(2, 42);
 
@@ -237,11 +261,11 @@ function buildDashboard_(ss, sh) {
   const ml = [['Ramię','B'],['Klatka','D'],['Talia','E'],['Udo','F']];
   ml.forEach((m, i) => {
     sh.getRange(9 + i, 8, 1, 2).merge().setValue(m[0]).setFontColor(C.muted);
-    sh.getRange(9 + i, 10).setFormula('=IFERROR(INDEX(Pomiary!' + m[1] + '2:' + m[1] + ',COUNTA(Pomiary!A2:A)),"–")').setNumberFormat('0.0').setFontWeight('bold').setFontSize(12);
-    sh.getRange(9 + i, 11).setFormula('=IFERROR(INDEX(Pomiary!' + m[1] + '2:' + m[1] + ',COUNTA(Pomiary!A2:A))-INDEX(Pomiary!' + m[1] + '2:' + m[1] + ',1),"")')
+    sh.getRange(9 + i, 10).setFormula(fx_('=IFERROR(INDEX(Pomiary!' + m[1] + '2:' + m[1] + ',COUNTA(Pomiary!A2:A)),"–")')).setNumberFormat('0.0').setFontWeight('bold').setFontSize(12);
+    sh.getRange(9 + i, 11).setFormula(fx_('=IFERROR(INDEX(Pomiary!' + m[1] + '2:' + m[1] + ',COUNTA(Pomiary!A2:A))-INDEX(Pomiary!' + m[1] + '2:' + m[1] + ',1),"")'))
       .setNumberFormat('+0.0;-0.0;0.0').setFontColor(C.good);
   });
-  sh.getRange('H13:K13').merge().setFormula('=IFERROR("od "&TEXT(INDEX(Pomiary!A2:A,1),"d mmm")&" do "&TEXT(INDEX(Pomiary!A2:A,COUNTA(Pomiary!A2:A)),"d mmm"),"brak pomiarów")').setFontSize(9).setFontColor(C.muted);
+  sh.getRange('H13:K13').merge().setFormula(fx_('=IFERROR("od "&TEXT(INDEX(Pomiary!A2:A,1),"d mmm")&" do "&TEXT(INDEX(Pomiary!A2:A,COUNTA(Pomiary!A2:A)),"d mmm"),"brak pomiarów")')).setFontSize(9).setFontColor(C.muted);
 
   // wykresy
   const w = ss.getSheetByName(SH.WEIGHT), wk = ss.getSheetByName(SH.WEEK);
@@ -274,10 +298,10 @@ function buildDashboard_(ss, sh) {
     .setBorder(null, null, true, null, null, null, C.line, SpreadsheetApp.BorderStyle.SOLID);
   for (let i = 0; i < 10; i++) {
     const r = 49 + i, src = i + 2;
-    sh.getRange(r, 2, 1, 5).merge().setFormula('=IFERROR(INDEX(Rekordy!A:A,' + src + ')&"","")');
-    sh.getRange(r, 7).setFormula('=IFERROR(INDEX(Rekordy!B:B,' + src + ')/1,"")').setNumberFormat('0.0').setFontWeight('bold');
-    sh.getRange(r, 8).setFormula('=IFERROR(INDEX(Rekordy!C:C,' + src + ')/1,"")').setNumberFormat('0.0');
-    sh.getRange(r, 9, 1, 2).merge().setFormula('=IFERROR(INDEX(Rekordy!E:E,' + src + ')/1,"")').setNumberFormat('d mmm').setFontColor(C.muted);
+    sh.getRange(r, 2, 1, 5).merge().setFormula(fx_('=IFERROR(INDEX(Rekordy!A:A,' + src + ')&"","")'));
+    sh.getRange(r, 7).setFormula(fx_('=IFERROR(INDEX(Rekordy!B:B,' + src + ')/1,"")')).setNumberFormat('0.0').setFontWeight('bold');
+    sh.getRange(r, 8).setFormula(fx_('=IFERROR(INDEX(Rekordy!C:C,' + src + ')/1,"")')).setNumberFormat('0.0');
+    sh.getRange(r, 9, 1, 2).merge().setFormula(fx_('=IFERROR(INDEX(Rekordy!E:E,' + src + ')/1,"")')).setNumberFormat('d mmm').setFontColor(C.muted);
   }
 
   sh.setFrozenRows(3);
@@ -289,9 +313,9 @@ function tile_(sh, col, row, label, formula, fmt, sub) {
   const box = sh.getRange(row, c, 3, 2);
   box.setBackground(C.band).setBorder(true, true, true, true, false, false, C.line, SpreadsheetApp.BorderStyle.SOLID);
   sh.getRange(row, c, 1, 2).merge().setValue(label).setFontSize(8).setFontColor(C.muted).setFontWeight('bold');
-  sh.getRange(row + 1, c, 1, 2).merge().setFormula(formula).setNumberFormat(fmt)
+  sh.getRange(row + 1, c, 1, 2).merge().setFormula(fx_(formula)).setNumberFormat(fmt)
     .setFontFamily('Roboto Condensed').setFontSize(22).setFontWeight('bold').setHorizontalAlignment('left');
-  sh.getRange(row + 2, c, 1, 2).merge().setFormula(sub).setFontSize(9).setFontColor(C.muted);
+  sh.getRange(row + 2, c, 1, 2).merge().setFormula(fx_(sub)).setFontSize(9).setFontColor(C.muted);
   sh.setRowHeight(row + 1, 38);
 }
 
@@ -422,8 +446,8 @@ function rewriteWeightFormulas_(sh) {
   const n = sh.getLastRow() - 1; if (n < 1) return;
   const c = [], d = [];
   for (let i = 0; i < n; i++) {
-    c.push(['=IFERROR(AVERAGEIFS(C2,C1,">"&RC1-7,C1,"<="&RC1),"")']);
-    d.push(['=IFERROR(RC[-1]-AVERAGEIFS(C2,C1,">"&RC1-14,C1,"<="&RC1-7),"")']);
+    c.push([fx_('=IFERROR(AVERAGEIFS(C2,C1,">"&RC1-7,C1,"<="&RC1),"")')]);
+    d.push([fx_('=IFERROR(RC[-1]-AVERAGEIFS(C2,C1,">"&RC1-14,C1,"<="&RC1-7),"")')]);
   }
   sh.getRange(2, 3, n, 1).setFormulasR1C1(c);
   sh.getRange(2, 4, n, 1).setFormulasR1C1(d);
