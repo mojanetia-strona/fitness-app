@@ -690,7 +690,10 @@ const A = {
   foodCancel(){ draft=null; render(); },
   foodSave(){ const name=$('#fname').value.trim(); const kcal=num($('#fkcal').value); if(!name) return flash($('#fname')); if(kcal==null) return flash($('#fkcal'));
     addFoodEntry({name, kcal, p:num($('#fp').value)||0, c:num($('#fc').value)||0, f:num($('#ff').value)||0, amount:num($('#famt').value)||'', ean:draft&&draft.ean||'', source:(draft&&draft.source)||'Ręcznie'});
-    if(draft&&draft.ean&&draft.per100){ const pr=S.diet.products[draft.ean]; if(pr){ pr.name=name; pr.amount=num($('#famt').value)||pr.amount; } }
+    if(draft&&draft.ean){ const amt=num($('#famt').value); const pr=S.diet.products[draft.ean];
+      if(pr){ pr.name=name; if(amt) pr.amount=amt; }
+      else { const base=amt||100; S.diet.products[draft.ean]={name, amount:base, own:true, per100:{kcal:kcal*100/base, p:(num($('#fp').value)||0)*100/base, c:(num($('#fc').value)||0)*100/base, f:(num($('#ff').value)||0)*100/base}}; }
+      save(); }
     draft=null; render(); },
   fav(b){ const f=S.diet.favs[+b.dataset.i]; if(!f) return; addFoodEntry({name:f.name,kcal:f.kcal,p:f.p,c:f.c,f:f.f,amount:f.amount,ean:f.ean,source:f.source||'Ręcznie'}); render(); },
   delFood(b){ const id=b.dataset.v; S.diet.foods=S.diet.foods.filter(f=>f.id!==id); enqueue('delFood',{id},'fd:'+id); render(); },
