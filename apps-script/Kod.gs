@@ -192,7 +192,7 @@ function buildDiet_(ss) {
   sh.getRange('C2').setFormula(fx_('=MAP(A2:A,LAMBDA(d,IF(d="",,SUMIFS(Catering!E2:E,Catering!A2:A,d,Catering!H2:H,TRUE)+SUMIFS(Jedzenie!H2:H,Jedzenie!B2:B,d))))'));
   sh.getRange('D2').setFormula(fx_('=MAP(A2:A,LAMBDA(d,IF(d="",,SUMIFS(Catering!D2:D,Catering!A2:A,d))))'));
   sh.getRange('E2').setFormula(fx_('=MAP(A2:A,LAMBDA(d,IF(d="",,SUMIFS(Jedzenie!G2:G,Jedzenie!B2:B,d))))'));
-  sh.getRange('F2').setFormula(fx_('=MAP(A2:A,LAMBDA(d,IF(d="",,3000)))'));
+  sh.getRange('F2').setFormula(fx_('=MAP(A2:A,LAMBDA(d,IF(d="",,3300)))'));
   sh.getRange('A2:A').setNumberFormat('ddd d mmm');
   sh.getRange('B2:F').setNumberFormat('0');
   sh.setColumnWidths(1, 6, 140);

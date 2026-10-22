@@ -257,7 +257,7 @@ const PLAN = [
     {id:'calf',    name:'Wspięcia na palce stojąc',              sets:3, reps:[12,15], rest:60,  inc:5}]}
 ];
 const GOAL = {start:85, target:90.5, rateLo:0.2, rateHi:0.35};
-const DGOAL = {kcal:3000, p:170};
+const DGOAL = {kcal:3300, p:170};
 const MEAS = [{k:'arm',l:'Ramię'},{k:'forearm',l:'Przedramię'},{k:'chest',l:'Klatka'},{k:'waist',l:'Talia'},{k:'thigh',l:'Udo'},{k:'calf',l:'Łydka'}];
 
 /* ============ helpers ============ */
@@ -281,7 +281,7 @@ const esc = s => String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&g
 
 /* ============ state ============ */
 const KEY='zd_state_v1';
-const fresh = () => ({v:1, view:'train', workouts:[], weights:[], measures:[], active:null, queue:[], settings:{url:'',token:''}, lastSync:null, syncErr:null, summary:null, demo:false, progEx:'bench', diet:{catering:{}, foods:[], fetched:null, eat:{}, favs:[], products:{}}, dietDate:null});
+const fresh = () => ({v:1, view:'train', workouts:[], weights:[], measures:[], active:null, queue:[], settings:{url:'',token:'',kcal:3300,protein:170}, lastSync:null, syncErr:null, summary:null, demo:false, progEx:'bench', diet:{catering:{}, foods:[], fetched:null, eat:{}, favs:[], products:{}}, dietDate:null});
 let S;
 function load(){ try{ const r=localStorage.getItem(KEY); if(!r) return null; const o=Object.assign(fresh(),JSON.parse(r)); o.diet=Object.assign(fresh().diet,o.diet||{}); return o; }catch(e){ return null; } }
 function save(){ try{ localStorage.setItem(KEY,JSON.stringify(S)); }catch(e){} }
@@ -626,6 +626,9 @@ V.settings = () => {
   <div class="field mt"><label class="label" for="stok">Token</label><input id="stok" value="${esc(st.token)}" autocapitalize="off" autocorrect="off"></div>
   <div class="row mt"><button class="btn primary" data-a="saveSettings">Zapisz i sprawdź</button><button class="btn" data-a="syncNow">Wyślij teraz</button></div>
   <p class="note" id="setmsg">${S.queue.length} w kolejce · ostatnia synchronizacja: ${S.lastSync?new Date(S.lastSync).toLocaleString('pl-PL'):'jeszcze nie'}${S.syncErr?' · '+esc(S.syncErr):''}</p></div>
+  <h3>Cele diety</h3><div class="panel"><div class="grid2"><div class="field"><label class="label" for="gkcal">Kalorie dziennie</label><input id="gkcal" inputmode="numeric" value="${DGOAL.kcal}"></div>
+  <div class="field"><label class="label" for="gprot">Białko (g)</label><input id="gprot" inputmode="numeric" value="${DGOAL.p}"></div></div>
+  <button class="btn mt" data-a="saveGoals">Zapisz cele</button></div>
   <h3>Dane</h3><div class="panel"><div class="row"><button class="btn" data-a="pull" data-confirm="1">Pobierz z arkusza</button><button class="btn" data-a="copyBackup">Kopiuj kopię zapasową</button></div>
   <p class="note">„Pobierz z arkusza” przywraca historię, np. na nowym telefonie. Kopia zapasowa kopiuje wszystkie dane jako tekst.</p>
   <div class="field mt"><label class="label" for="restore">Wklej kopię zapasową</label><textarea id="restore" placeholder='{"workouts":[…]}'></textarea></div>
@@ -701,10 +704,12 @@ const A = {
   scanClose(){ closeScanner(); },
   eanGo(){ const c=$('#eanin').value; closeScanner(); lookupEan(c); },
   dietRefresh(b,e){ e&&e.preventDefault(); fetchDiet(true); },
+  saveGoals(){ const k=num($('#gkcal').value), p=num($('#gprot').value); if(!k||k<1000||k>8000) return flash($('#gkcal')); if(!p||p<30||p>500) return flash($('#gprot')); S.settings.kcal=k; S.settings.protein=p; applyGoals(); save(); $('#setmsg').textContent='Zapisano cele: '+k+' kcal, '+p+' g białka.'; },
   restore(){ try{ const j=JSON.parse($('#restore').value); ['workouts','weights','measures'].forEach(k=>{ if(Array.isArray(j[k])) S[k]=j[k]; }); S.demo=false; save(); render(); }
     catch(e){ flash($('#restore')); } },
   clearDemo(){ const st=S.settings; S=fresh(); S.settings=st; S.demoCleared=true; save(); render(); }
 };
+function applyGoals(){ DGOAL.kcal=+S.settings.kcal||3300; DGOAL.p=+S.settings.protein||170; }
 function parseCode(code){ try{ const b=(String(code).replace(/^[\s\S]*?ZD:/,'').replace(/[^A-Za-z0-9+/=]/g,'')); const j=JSON.parse(decodeURIComponent(escape(atob(b)))); return (j.url&&j.token)?j:null; }catch(e){ return null; } }
 function flash(el){ if(!el) return; el.style.borderColor='var(--bad)'; el.focus(); setTimeout(()=>el.style.borderColor='',1500); }
 document.addEventListener('click',e=>{
@@ -752,7 +757,7 @@ S = load();
 if(!S){ S = IS_REAL ? fresh() : seedDemo(); save(); }
 if(S.active && S.view!=='workout' && S.view!=='settings') S.view='workout';
 try{ const m=location.hash.match(/^#zd=(.+)$/); if(m){ const c=parseCode(m[1]); if(c){ S.settings.url=c.url; S.settings.token=c.token; save(); } history.replaceState(null,'',location.pathname); } }catch(e){}
-render(); sync(); fetchDiet();
+applyGoals(); render(); sync(); fetchDiet();
 if('serviceWorker' in navigator && IS_REAL){ try{ navigator.serviceWorker.register('sw.js',{updateViaCache:'none'}).then(r=>r.update()).catch(()=>{}); }catch(e){} }
 </script>
 
