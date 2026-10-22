@@ -241,16 +241,16 @@ function buildDashboard_(ss, sh) {
   const WEEK0 = 'TODAY()-WEEKDAY(TODAY(),2)+1';
   const tiles = [
     // [kolumna start, wiersz, etykieta, formuła, format, podpis]
-    ['B', 5, 'ŚREDNIA 7 DNI', '=IFERROR(INDEX(Waga!C2:C,COUNTA(Waga!A2:A)),"–")', '0.0" kg"',
-      '="ostatni wpis: "&IFERROR(TEXT(INDEX(Waga!B2:B,COUNTA(Waga!A2:A)),"0.0")&" kg","brak")'],
-    ['D', 5, 'TEMPO / TYDZIEŃ', '=IFERROR(INDEX(Waga!D2:D,COUNTA(Waga!A2:A)),"–")', '+0.00" kg";-0.00" kg"',
+    ['B', 5, 'ŚREDNIA 7 DNI', '=IF(COUNTA(Waga!A2:A)=0,"–",INDEX(Waga!C2:C,COUNTA(Waga!A2:A)))', '0.0" kg"',
+      '=IF(COUNTA(Waga!A2:A)=0,"brak wpisów","ostatni wpis: "&TEXT(INDEX(Waga!B2:B,COUNTA(Waga!A2:A)),"0.0")&" kg")'],
+    ['D', 5, 'TEMPO / TYDZIEŃ', '=IF(COUNTA(Waga!A2:A)<2,"–",INDEX(Waga!D2:D,COUNTA(Waga!A2:A)))', '+0.00" kg";-0.00" kg"',
       '=IF(NOT(ISNUMBER(D6)),"cel 0,2-0,35 kg",IF(D6<0.2,"za wolno: dodaj 100-150 kcal",IF(D6<=0.35,"w celu 0,2-0,35 kg",IF(D6<=0.5,"szybko, obserwuj","za szybko: odejmij 100-150 kcal"))))'],
-    ['F', 5, 'DO CELU', '=IFERROR(K5-B6,"–")', '0.0" kg"',
-      '=IFERROR("zrobione "&TEXT((B6-K6)/(K5-K6),"0%")&" masy","")'],
+    ['F', 5, 'DO CELU', '=IF(ISNUMBER(B6),K5-B6,"–")', '0.0" kg"',
+      '=IF(ISNUMBER(B6),"zrobione "&TEXT((B6-K6)/(K5-K6),"0%")&" masy","")'],
     ['B', 9, 'TRENINGI W TYM TYG.', '=COUNTIFS(Treningi!B2:B,">="&' + WEEK0 + ')', '0" / 5"',
       '="serie: "&SUMIFS(Treningi!G2:G,Treningi!B2:B,">="&' + WEEK0 + ')'],
     ['D', 9, 'OSTATNI TRENING', '=IFERROR(INDEX(SORT(Treningi!B2:C,1,FALSE),1,2),"–")', '@',
-      '=IFERROR(TEXT(MAX(Treningi!B2:B),"dddd, d mmm"),"")'],
+      '=IF(COUNT(Treningi!B2:B)=0,"brak treningów",TEXT(MAX(Treningi!B2:B),"dddd, d mmm"))'],
     ['F', 9, 'OBJĘTOŚĆ TYG.', '=SUMIFS(Treningi!H2:H,Treningi!B2:B,">="&' + WEEK0 + ')/1000', '0.0" t"',
       '=IFERROR("poprz. tydz.: "&TEXT(SUMIFS(Treningi!H2:H,Treningi!B2:B,">="&(' + WEEK0 + '-7),Treningi!B2:B,"<"&' + WEEK0 + ')/1000,"0.0")&" t","")']
   ];
@@ -261,11 +261,11 @@ function buildDashboard_(ss, sh) {
   const ml = [['Ramię','B'],['Klatka','D'],['Talia','E'],['Udo','F']];
   ml.forEach((m, i) => {
     sh.getRange(9 + i, 8, 1, 2).merge().setValue(m[0]).setFontColor(C.muted);
-    sh.getRange(9 + i, 10).setFormula(fx_('=IFERROR(INDEX(Pomiary!' + m[1] + '2:' + m[1] + ',COUNTA(Pomiary!A2:A)),"–")')).setNumberFormat('0.0').setFontWeight('bold').setFontSize(12);
-    sh.getRange(9 + i, 11).setFormula(fx_('=IFERROR(INDEX(Pomiary!' + m[1] + '2:' + m[1] + ',COUNTA(Pomiary!A2:A))-INDEX(Pomiary!' + m[1] + '2:' + m[1] + ',1),"")'))
+    sh.getRange(9 + i, 10).setFormula(fx_('=IF(COUNTA(Pomiary!A2:A)=0,"–",INDEX(Pomiary!' + m[1] + '2:' + m[1] + ',COUNTA(Pomiary!A2:A)))')).setNumberFormat('0.0').setFontWeight('bold').setFontSize(12);
+    sh.getRange(9 + i, 11).setFormula(fx_('=IF(COUNTA(Pomiary!A2:A)<2,"",INDEX(Pomiary!' + m[1] + '2:' + m[1] + ',COUNTA(Pomiary!A2:A))-INDEX(Pomiary!' + m[1] + '2:' + m[1] + ',1))'))
       .setNumberFormat('+0.0;-0.0;0.0').setFontColor(C.good);
   });
-  sh.getRange('H13:K13').merge().setFormula(fx_('=IFERROR("od "&TEXT(INDEX(Pomiary!A2:A,1),"d mmm")&" do "&TEXT(INDEX(Pomiary!A2:A,COUNTA(Pomiary!A2:A)),"d mmm"),"brak pomiarów")')).setFontSize(9).setFontColor(C.muted);
+  sh.getRange('H13:K13').merge().setFormula(fx_('=IF(COUNTA(Pomiary!A2:A)=0,"brak pomiarów","od "&TEXT(INDEX(Pomiary!A2:A,1),"d mmm")&" do "&TEXT(INDEX(Pomiary!A2:A,COUNTA(Pomiary!A2:A)),"d mmm"))')).setFontSize(9).setFontColor(C.muted);
 
   // wykresy
   const w = ss.getSheetByName(SH.WEIGHT), wk = ss.getSheetByName(SH.WEEK);
