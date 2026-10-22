@@ -9,7 +9,7 @@
  */
 
 const TZ = 'Europe/Warsaw';
-const SH = { DASH:'Dashboard', TRAIN:'Treningi', SETS:'Serie', WEIGHT:'Waga', MEAS:'Pomiary', REC:'Rekordy', WEEK:'Tygodnie', PLAN:'Plan' };
+const SH = { DASH:'Dashboard', TRAIN:'Treningi', SETS:'Serie', WEIGHT:'Waga', MEAS:'Pomiary', REC:'Rekordy', WEEK:'Tygodnie', PLAN:'Plan', CAT:'Catering', FOOD:'Jedzenie', DIET:'Dieta' };
 const C = {
   ink:'#1D1D1D', muted:'#5B6770', line:'#E3E7EA', band:'#F5F5F5', head:'#00283D', headTxt:'#FFFFFF',
   accent:'#0079C2', accentSoft:'#E5F2FA', good:'#0079C2', goodSoft:'#E5F2FA', warnSoft:'#FFF3DF', bad:'#D0105B', pink:'#EE1264',
@@ -84,6 +84,12 @@ function setup() {
     [110,100,120,140], {A:'d mmm yyyy', B:'0.0', C:'0.00', D:'+0.00;-0.00;0.00'});
   dataSheet_(ss, SH.MEAS, ['Data','Ramię','Przedramię','Klatka','Talia','Udo','Łydka','Tłuszcz %'],
     [110,80,95,80,80,80,80,90], {A:'d mmm yyyy', B:'0.0', C:'0.0', D:'0.0', E:'0.0', F:'0.0', G:'0.0', H:'0.0'});
+  dataSheet_(ss, SH.CAT, ['Data','Posiłek','Nazwa','kcal','Białko','Węgle','Tłuszcz','Zjedzone','Dieta'],
+    [100,110,380,70,70,70,70,85,170], {A:'d mmm yyyy', D:'0', E:'0.0', F:'0.0', G:'0.0'});
+  ss.getSheetByName(SH.CAT).getRange('H2:H').setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build());
+  dataSheet_(ss, SH.FOOD, ['ID','Data','Godzina','Źródło','Nazwa','Ilość','kcal','Białko','Węgle','Tłuszcz','Kod EAN'],
+    [110,100,70,90,280,70,70,70,70,70,120], {B:'d mmm yyyy', C:'HH:mm', G:'0', H:'0.0', I:'0.0', J:'0.0', K:'@'});
+  buildDiet_(ss);
   buildPlan_(ss);
   buildWeeks_(ss);
   buildRecords_(ss);
@@ -91,7 +97,7 @@ function setup() {
   buildDashboard_(ss, dash);
 
   // kolejność i sprzątanie
-  [SH.DASH, SH.TRAIN, SH.SETS, SH.WEIGHT, SH.MEAS, SH.REC, SH.WEEK, SH.PLAN].forEach((n, i) => {
+  [SH.DASH, SH.DIET, SH.TRAIN, SH.SETS, SH.WEIGHT, SH.MEAS, SH.CAT, SH.FOOD, SH.REC, SH.WEEK, SH.PLAN].forEach((n, i) => {
     ss.setActiveSheet(ss.getSheetByName(n)); ss.moveActiveSheet(i + 1);
   });
   ['Arkusz1','Sheet1'].forEach(n => { const s = ss.getSheetByName(n); if (s && s.getLastRow() === 0) ss.deleteSheet(s); });
@@ -150,6 +156,24 @@ function buildWeeks_(ss) {
   sh.getRange('D2:D').setNumberFormat('#,##0');
   sh.getRange('A1:D1').setBackground(C.head).setFontColor(C.headTxt).setFontWeight('bold');
   sh.setColumnWidths(1, 4, 110);
+}
+
+function buildDiet_(ss) {
+  const sh = sheet_(ss, SH.DIET);
+  sh.clear(); sh.getBandings().forEach(b => b.remove());
+  sh.getRange(1, 1, 1, 6).setValues([['Data','Zjedzone kcal','Białko (g)','Catering (plan kcal)','Dodatkowe kcal','Cel kcal']])
+    .setBackground(C.head).setFontColor(C.headTxt).setFontWeight('bold');
+  sh.getRange('A2').setFormula('=IFERROR(SORT(UNIQUE(FILTER({Catering!A2:A;Jedzenie!B2:B},{Catering!A2:A;Jedzenie!B2:B}<>""))),)');
+  sh.getRange('B2').setFormula('=MAP(A2:A,LAMBDA(d,IF(d="",,SUMIFS(Catering!D2:D,Catering!A2:A,d,Catering!H2:H,TRUE)+SUMIFS(Jedzenie!G2:G,Jedzenie!B2:B,d))))');
+  sh.getRange('C2').setFormula('=MAP(A2:A,LAMBDA(d,IF(d="",,SUMIFS(Catering!E2:E,Catering!A2:A,d,Catering!H2:H,TRUE)+SUMIFS(Jedzenie!H2:H,Jedzenie!B2:B,d))))');
+  sh.getRange('D2').setFormula('=MAP(A2:A,LAMBDA(d,IF(d="",,SUMIFS(Catering!D2:D,Catering!A2:A,d))))');
+  sh.getRange('E2').setFormula('=MAP(A2:A,LAMBDA(d,IF(d="",,SUMIFS(Jedzenie!G2:G,Jedzenie!B2:B,d))))');
+  sh.getRange('F2').setFormula('=MAP(A2:A,LAMBDA(d,IF(d="",,3000)))');
+  sh.getRange('A2:A').setNumberFormat('ddd d mmm');
+  sh.getRange('B2:F').setNumberFormat('0');
+  sh.setColumnWidths(1, 6, 140);
+  sh.setFrozenRows(1);
+  sh.setTabColor(C.pink);
 }
 
 function buildRecords_(ss) {
@@ -276,7 +300,8 @@ function doGet(e) {
   const p = (e && e.parameter) || {};
   if (p.token !== getToken_()) return json_({ ok: false, error: 'Zły token' });
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  if (p.action === 'pull') return json_(Object.assign({ ok: true }, pullAll_(ss)));
+  if (p.action === 'pull') return json_(Object.assign({ ok: true }, pullAll_(ss), dietRange_(ss, '', '')));
+  if (p.action === 'diet') return json_(Object.assign({ ok: true }, dietRange_(ss, p.from || '', p.to || '')));
   return json_({ ok: true, name: ss.getName() });
 }
 
@@ -310,6 +335,10 @@ function handle_(ss, it) {
     case 'delWeight':  deleteDate_(ss.getSheetByName(SH.WEIGHT), d.date); rewriteWeightFormulas_(ss.getSheetByName(SH.WEIGHT)); break;
     case 'measure':    upsertByDate_(ss.getSheetByName(SH.MEAS), d.date, MEAS_COLS.map(k => d[k] == null ? '' : d[k])); break;
     case 'delMeasure': deleteDate_(ss.getSheetByName(SH.MEAS), d.date); break;
+    case 'catering':   saveCatering_(ss, d); break;
+    case 'eat':        setEaten_(ss, d); break;
+    case 'food':       saveFood_(ss, d); break;
+    case 'delFood':    deleteWhere_(ss.getSheetByName(SH.FOOD), 1, d.id); break;
     default: throw new Error('Nieznany typ ' + it.type);
   }
 }
@@ -324,6 +353,42 @@ function saveWorkout_(ss, w) {
   if (rows.length) st.getRange(st.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(rows);
   if (tr.getLastRow() > 2) tr.getRange(2, 1, tr.getLastRow() - 1, tr.getLastColumn()).sort([{ column: 2, ascending: true }, { column: 4, ascending: true }]);
   colorDays_(tr);
+}
+
+function saveCatering_(ss, d) {
+  const sh = ss.getSheetByName(SH.CAT);
+  // zachowaj odhaczenia "nie zjedzone" dla tego dnia
+  const keep = {};
+  if (sh.getLastRow() > 1) sh.getRange(2, 1, sh.getLastRow() - 1, 8).getValues().forEach(r => {
+    if (key_(r[0]) === d.date && r[7] === false) keep[r[1]] = false;
+  });
+  deleteDate_(sh, d.date);
+  const rows = (d.meals || []).map(m => [toDate_(d.date), m.meal, m.name, m.kcal, m.p, m.c, m.f, keep[m.meal] === false ? false : true, d.diet || '']);
+  if (rows.length) sh.getRange(sh.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(rows);
+  if (sh.getLastRow() > 2) sh.getRange(2, 1, sh.getLastRow() - 1, sh.getLastColumn()).sort({ column: 1, ascending: true });
+}
+
+function setEaten_(ss, d) {
+  const sh = ss.getSheetByName(SH.CAT); const n = sh.getLastRow() - 1; if (n < 1) return;
+  const vals = sh.getRange(2, 1, n, 2).getValues();
+  vals.forEach((r, i) => { if (key_(r[0]) === d.date && r[1] === d.meal) sh.getRange(i + 2, 8).setValue(!!d.eaten); });
+}
+
+function saveFood_(ss, f) {
+  const sh = ss.getSheetByName(SH.FOOD);
+  deleteWhere_(sh, 1, f.id);
+  sh.appendRow([f.id, toDate_(f.date), f.time ? new Date(f.time) : '', f.source || 'Ręcznie', f.name, f.amount || '', f.kcal || 0, f.p || 0, f.c || 0, f.f || 0, f.ean ? String(f.ean) : '']);
+  if (sh.getLastRow() > 2) sh.getRange(2, 1, sh.getLastRow() - 1, sh.getLastColumn()).sort([{ column: 2, ascending: true }, { column: 3, ascending: true }]);
+}
+
+function dietRange_(ss, from, to) {
+  const cat = ss.getSheetByName(SH.CAT), fd = ss.getSheetByName(SH.FOOD);
+  const inR = k => (!from || k >= from) && (!to || k <= to);
+  const catering = cat && cat.getLastRow() > 1 ? cat.getRange(2, 1, cat.getLastRow() - 1, 9).getValues().filter(r => r[0] && inR(key_(r[0])))
+    .map(r => ({ date: key_(r[0]), meal: r[1], name: r[2], kcal: Number(r[3]) || 0, p: Number(r[4]) || 0, c: Number(r[5]) || 0, f: Number(r[6]) || 0, eaten: r[7] !== false, diet: r[8] })) : [];
+  const foods = fd && fd.getLastRow() > 1 ? fd.getRange(2, 1, fd.getLastRow() - 1, 11).getValues().filter(r => r[0] && inR(key_(r[1])))
+    .map(r => ({ id: String(r[0]), date: key_(r[1]), time: r[2] instanceof Date ? r[2].getTime() : null, source: r[3], name: r[4], amount: r[5], kcal: Number(r[6]) || 0, p: Number(r[7]) || 0, c: Number(r[8]) || 0, f: Number(r[9]) || 0, ean: String(r[10] || '') })) : [];
+  return { catering: catering, foods: foods };
 }
 
 function colorDays_(tr) {
