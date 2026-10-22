@@ -545,7 +545,7 @@ const A = {
     catch(e){ flash($('#restore')); } },
   clearDemo(){ const st=S.settings; S=fresh(); S.settings=st; S.demoCleared=true; save(); render(); }
 };
-function parseCode(code){ try{ const j=JSON.parse(decodeURIComponent(escape(atob(code.replace(/^ZD:/,'').trim())))); return (j.url&&j.token)?j:null; }catch(e){ return null; } }
+function parseCode(code){ try{ const b=(String(code).replace(/^[\s\S]*?ZD:/,'').replace(/[^A-Za-z0-9+/=]/g,'')); const j=JSON.parse(decodeURIComponent(escape(atob(b)))); return (j.url&&j.token)?j:null; }catch(e){ return null; } }
 function flash(el){ if(!el) return; el.style.borderColor='var(--bad)'; el.focus(); setTimeout(()=>el.style.borderColor='',1500); }
 document.addEventListener('click',e=>{
   const b=e.target.closest('[data-a]'); if(!b) return; const a=A[b.dataset.a]; if(!a) return;
@@ -584,5 +584,5 @@ if(!S){ S = IS_REAL ? fresh() : seedDemo(); save(); }
 if(S.active && S.view!=='workout' && S.view!=='settings') S.view='workout';
 try{ const m=location.hash.match(/^#zd=(.+)$/); if(m){ const c=parseCode(m[1]); if(c){ S.settings.url=c.url; S.settings.token=c.token; save(); } history.replaceState(null,'',location.pathname); } }catch(e){}
 render(); sync();
-if('serviceWorker' in navigator && IS_REAL){ try{ navigator.serviceWorker.register('sw.js'); }catch(e){} }
+if('serviceWorker' in navigator && IS_REAL){ try{ navigator.serviceWorker.register('sw.js',{updateViaCache:'none'}).then(r=>r.update()).catch(()=>{}); }catch(e){} }
 </script>
