@@ -135,7 +135,7 @@ function setup() {
   ['Arkusz1','Sheet1'].forEach(n => { const s = ss.getSheetByName(n); if (s && s.getLastRow() === 0) ss.deleteSheet(s); });
   ss.getSheetByName(SH.WEEK).setTabColor(C.grey);
   ss.setActiveSheet(dash);
-  showToken();
+  try { showToken(); } catch (e) {}
 }
 
 function sheet_(ss, name) { return ss.getSheetByName(name) || ss.insertSheet(name); }
