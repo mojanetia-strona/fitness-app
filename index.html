@@ -281,7 +281,7 @@ const esc = s => String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&g
 
 /* ============ state ============ */
 const KEY='zd_state_v1';
-const fresh = () => ({v:1, view:'train', workouts:[], weights:[], measures:[], active:null, queue:[], settings:{url:'',token:'',kcal:3300,protein:170}, lastSync:null, syncErr:null, summary:null, demo:false, progEx:'bench', diet:{catering:{}, foods:[], fetched:null, eat:{}, favs:[], products:{}}, dietDate:null});
+const fresh = () => ({v:1, view:'train', workouts:[], weights:[], measures:[], active:null, queue:[], settings:{url:'',token:'',kcal:3300,protein:170}, lastSync:null, syncErr:null, summary:null, demo:false, progEx:'bench', diet:{catering:{}, foods:[], fetched:null, eat:{}, favs:[], products:{}, daily:{}}, sleep:{}, dietDate:null});
 let S;
 function load(){ try{ const r=localStorage.getItem(KEY); if(!r) return null; const o=Object.assign(fresh(),JSON.parse(r)); o.diet=Object.assign(fresh().diet,o.diet||{}); return o; }catch(e){ return null; } }
 function save(){ try{ localStorage.setItem(KEY,JSON.stringify(S)); }catch(e){} }
@@ -480,7 +480,9 @@ V.weight = () => {
   let h=`<h2>Waga</h2><p class="lede">Rano, na czczo, 3 do 4 razy w tygodniu. Liczy się średnia tygodniowa.</p>
   <div class="panel"><div class="grid2"><div class="field"><label class="label" for="wdate">Data</label><input type="date" id="wdate" value="${t}"></div><div></div></div>
     <div class="big-in mt"><button class="step" data-a="wstep" data-v="-0.1" aria-label="Minus 0,1">−</button><input id="wkg" inputmode="decimal" value="${last?fN(last.kg):''}" placeholder="85,0" aria-label="Waga w kg"><button class="step" data-a="wstep" data-v="0.1" aria-label="Plus 0,1">+</button></div>
-    <button class="btn primary block mt" data-a="saveWeight">Zapisz wagę</button></div>
+    <div class="row mt" style="flex-wrap:nowrap"><label class="label" for="wsleep" style="flex:none;width:72px">Sen (h)</label><button class="step" style="height:46px;width:46px;font-size:20px" data-a="sstep" data-v="-0.5" aria-label="Minus pół godziny">−</button><input id="wsleep" inputmode="decimal" value="${S.sleep[t]!=null?fN(S.sleep[t]):''}" placeholder="${fN(lastSleep()??8)}" style="flex:1;min-width:0;height:46px;border:1px solid var(--line);text-align:center;font:700 22px var(--f-body);color:var(--navy)"><button class="step" style="height:46px;width:46px;font-size:20px" data-a="sstep" data-v="0.5" aria-label="Plus pół godziny">+</button></div>
+    <button class="btn primary block mt" data-a="saveWeight">Zapisz</button></div>
+  ${sleepStepsPanel()}
   <div class="strip mt"><div><div class="label">Śr. 7 dni</div><div class="v">${fN(a7)}<small>kg</small></div></div>
     <div><div class="label">Tempo / tydz.</div><div class="v">${rate==null?'–':(rate>0?'+':'')+fN(rate,2)}<small>kg</small></div></div>
     <div><div class="label">Status</div><div style="margin-top:6px">${st}</div></div></div>
@@ -496,6 +498,14 @@ V.weight = () => {
   h+=`<h3>Wpisy</h3><div class="panel list">${ws.slice(-12).reverse().map(w=>`<div class="li"><span class="d">${fD(w.date)}</span><span class="v">${fN(w.kg)} kg</span><button class="x" data-a="delWeight" data-v="${w.date}" data-confirm="1">Usuń</button></div>`).join('')||'<div class="empty">Brak wpisów. Zapisz pierwszą wagę powyżej.</div>'}</div>`;
   return h;
 };
+function lastSleep(){ const ks=Object.keys(S.sleep).sort(); return ks.length?S.sleep[ks[ks.length-1]]:null; }
+function sleepStepsPanel(){
+  const t=today(); const days=[...Array(7)].map((_,i)=>addDays(t,-i));
+  const sl=days.map(d=>S.sleep[d]!=null?S.sleep[d]:(S.diet.daily[d]&&S.diet.daily[d].sleep)).filter(x=>x!=null&&x!=='');
+  const st=days.map(d=>S.diet.daily[d]&&S.diet.daily[d].steps).filter(x=>x!=null&&x!=='');
+  const a=x=>x.length?x.reduce((p,q)=>p+ +q,0)/x.length:null; const as=a(sl), at=a(st);
+  return `<div class="strip mt" style="grid-template-columns:1fr 1fr"><div><div class="label">Sen śr. 7 dni</div><div class="v">${as==null?'–':fN(as)}<small>h</small></div></div><div><div class="label">Kroki śr. 7 dni</div><div class="v">${at==null?'–':Math.round(at).toLocaleString('pl-PL')}</div></div></div>${st.length?'':'<p class="note">Kroki dochodzą ze Skrótów iOS raz dziennie wieczorem.</p>'}`;
+}
 V.measure = () => {
   const ms=S.measures.slice().sort((a,b)=>a.date<b.date?-1:1); const last=ms[ms.length-1], prev=ms[ms.length-2];
   let h=`<h2>Pomiary</h2><p class="lede">Co 2 do 4 tygodni, rano, taśmą w tych samych miejscach. Ramię mierz napięte.</p>
@@ -541,6 +551,7 @@ async function fetchDiet(force){
       Object.keys(S.diet.eat).forEach(k=>{ if(!pend.has('eat:'+k)) delete S.diet.eat[k]; });
       const have=new Set(S.diet.foods.map(f=>f.id)); const delPend=new Set(S.queue.filter(q=>q.type==='delFood').map(q=>q.data.id));
       j.foods.forEach(f=>{ if(!have.has(f.id) && !delPend.has(f.id)) S.diet.foods.push(f); });
+      if(j.daily){ const dm={}; j.daily.forEach(x=>{ dm[x.date]=x; }); S.diet.daily=Object.assign(S.diet.daily||{}, dm); }
       S.diet.fetched=Date.now(); save(); if(S.view==='diet') render(); }
   }catch(e){}
   dietFetching=false;
@@ -663,8 +674,12 @@ const A = {
   restAdd(b){ if(rest){ rest.end+=(+b.dataset.v)*1000; rest.total=Math.max(rest.total,(rest.end-Date.now())/1000); rest.fired=false; $('#rest').classList.remove('over'); tickRest(); } },
   restStop(){ stopRest(); },
   wstep(b){ const el=$('#wkg'); const v=(num(el.value)||85)+parseFloat(b.dataset.v); el.value=fN(Math.round(v*10)/10); },
-  saveWeight(){ const kg=num($('#wkg').value), date=$('#wdate').value||today(); if(!kg||kg<30||kg>250) return flash($('#wkg'));
+  saveWeight(){ const kg=num($('#wkg').value), date=$('#wdate').value||today(); const sl=num($('#wsleep').value);
+    if(sl!=null){ if(sl<0||sl>16) return flash($('#wsleep')); S.sleep[date]=sl; enqueue('daily',{date,sleep:sl},'sl:'+date); }
+    if($('#wkg').value.trim()===''){ if(sl==null) return flash($('#wkg')); render(); return; }
+    if(!kg||kg<30||kg>250) return flash($('#wkg'));
     S.weights=S.weights.filter(w=>w.date!==date); S.weights.push({date,kg}); enqueue('weight',{date,kg},'wt:'+date); render(); },
+  sstep(b){ const el=$('#wsleep'); const v=(num(el.value)??(lastSleep()??8))+parseFloat(b.dataset.v); el.value=fN(Math.max(0,Math.min(16,v))); },
   delWeight(b){ const d=b.dataset.v; S.weights=S.weights.filter(w=>w.date!==d); enqueue('delWeight',{date:d},'wt:'+d); render(); },
   saveMeasure(){ const date=$('#mdate').value||today(); const m={date}; let any=false;
     MEAS.forEach(x=>{ const v=num($('#m-'+x.k).value); if(v){ m[x.k]=v; any=true; } }); const bf=num($('#mbf').value); if(bf){ m.bf=bf; any=true; }

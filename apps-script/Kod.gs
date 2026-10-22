@@ -9,7 +9,10 @@
  */
 
 const TZ = 'Europe/Warsaw';
-const SH = { DASH:'Dashboard', TRAIN:'Treningi', SETS:'Serie', WEIGHT:'Waga', MEAS:'Pomiary', REC:'Rekordy', WEEK:'Tygodnie', PLAN:'Plan', CAT:'Catering', FOOD:'Jedzenie', DIET:'Dieta' };
+const SH = { DASH:'Dashboard', TRAIN:'Treningi', SETS:'Serie', WEIGHT:'Waga', MEAS:'Pomiary', REC:'Rekordy', WEEK:'Tygodnie', PLAN:'Plan', CAT:'Catering', FOOD:'Jedzenie', DIET:'Dieta', DAILY:'Codziennie', REP:'Raporty' };
+const REPORT_TO = 'glowadzkilukasz@gmail.com';
+const APP_URL = 'https://mojanetia-strona.github.io/fitness-app/';
+const MUSCLE = { bench:'Klatka', incdb:'Klatka', flatdb:'Klatka', cablefly:'Klatka', ohp:'Barki', latraise:'Barki', facepull:'Barki', cgskull:'Triceps', ohext:'Triceps', pushdown:'Triceps', dips:'Triceps', deadlift:'Plecy', wpullup:'Plecy', bbrow:'Plecy', latpull:'Plecy', csrow:'Plecy', bbcurl:'Biceps', hammer:'Biceps', inclcurl:'Biceps', cablecurl:'Biceps', squat:'Nogi', legpress:'Nogi', legcurl:'Nogi', calf:'Nogi' };
 const C = {
   ink:'#1D1D1D', muted:'#5B6770', line:'#E3E7EA', band:'#F5F5F5', head:'#00283D', headTxt:'#FFFFFF',
   accent:'#0079C2', accentSoft:'#E5F2FA', good:'#0079C2', goodSoft:'#E5F2FA', warnSoft:'#FFF3DF', bad:'#D0105B', pink:'#EE1264',
@@ -76,6 +79,8 @@ function onOpen() {
   SpreadsheetApp.getUi().createMenu('Fitness')
     .addItem('Zbuduj / odśwież arkusz', 'setup')
     .addItem('Pokaż token', 'showToken')
+    .addItem('Włącz niedzielny raport mailem', 'installReportTrigger')
+    .addItem('Wyślij raport teraz (test)', 'sendWeeklyReport')
     .addToUi();
 }
 
@@ -114,6 +119,9 @@ function setup() {
   dataSheet_(ss, SH.FOOD, ['ID','Data','Godzina','Źródło','Nazwa','Ilość','kcal','Białko','Węgle','Tłuszcz','Kod EAN'],
     [110,100,70,90,280,70,70,70,70,70,120], {B:'d mmm yyyy', C:'HH:mm', G:'0', H:'0.0', I:'0.0', J:'0.0', K:'@'});
   buildDiet_(ss);
+  dataSheet_(ss, SH.DAILY, ['Data','Kroki','Sen (h)'], [110,90,90], {A:'d mmm yyyy', B:'#,##0', C:'0.0'});
+  dataSheet_(ss, SH.REP, ['Tydzień od','Data wpisu','Komentarz trenera','Zalecenia','Wysłano'], [100,130,520,420,130], {A:'d mmm yyyy', B:'d mmm yyyy HH:mm', E:'d mmm yyyy HH:mm'});
+  ss.getSheetByName(SH.REP).getRange('C2:D').setWrap(true).setVerticalAlignment('top');
   buildPlan_(ss);
   buildWeeks_(ss);
   buildRecords_(ss);
@@ -121,7 +129,7 @@ function setup() {
   buildDashboard_(ss, dash);
 
   // kolejność i sprzątanie
-  [SH.DASH, SH.DIET, SH.TRAIN, SH.SETS, SH.WEIGHT, SH.MEAS, SH.CAT, SH.FOOD, SH.REC, SH.WEEK, SH.PLAN].forEach((n, i) => {
+  [SH.DASH, SH.DIET, SH.TRAIN, SH.SETS, SH.WEIGHT, SH.MEAS, SH.DAILY, SH.CAT, SH.FOOD, SH.REP, SH.REC, SH.WEEK, SH.PLAN].forEach((n, i) => {
     ss.setActiveSheet(ss.getSheetByName(n)); ss.moveActiveSheet(i + 1);
   });
   ['Arkusz1','Sheet1'].forEach(n => { const s = ss.getSheetByName(n); if (s && s.getLastRow() === 0) ss.deleteSheet(s); });
@@ -325,6 +333,7 @@ function doGet(e) {
   if (p.token !== getToken_()) return json_({ ok: false, error: 'Zły token' });
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   if (p.action === 'pull') return json_(Object.assign({ ok: true }, pullAll_(ss), dietRange_(ss, '', '')));
+  if (p.action === 'daily') { upsertDaily_(ss, p.date || Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd'), { steps: p.steps, sleep: p.sleep }); return json_({ ok: true }); }
   if (p.action === 'diet') return json_(Object.assign({ ok: true }, dietRange_(ss, p.from || '', p.to || '')));
   return json_({ ok: true, name: ss.getName() });
 }
@@ -362,6 +371,7 @@ function handle_(ss, it) {
     case 'catering':   saveCatering_(ss, d); break;
     case 'eat':        setEaten_(ss, d); break;
     case 'food':       saveFood_(ss, d); break;
+    case 'daily':      upsertDaily_(ss, d.date, d); break;
     case 'delFood':    deleteWhere_(ss.getSheetByName(SH.FOOD), 1, d.id); break;
     default: throw new Error('Nieznany typ ' + it.type);
   }
@@ -412,7 +422,10 @@ function dietRange_(ss, from, to) {
     .map(r => ({ date: key_(r[0]), meal: r[1], name: r[2], kcal: Number(r[3]) || 0, p: Number(r[4]) || 0, c: Number(r[5]) || 0, f: Number(r[6]) || 0, eaten: r[7] !== false, diet: r[8] })) : [];
   const foods = fd && fd.getLastRow() > 1 ? fd.getRange(2, 1, fd.getLastRow() - 1, 11).getValues().filter(r => r[0] && inR(key_(r[1])))
     .map(r => ({ id: String(r[0]), date: key_(r[1]), time: r[2] instanceof Date ? r[2].getTime() : null, source: r[3], name: r[4], amount: r[5], kcal: Number(r[6]) || 0, p: Number(r[7]) || 0, c: Number(r[8]) || 0, f: Number(r[9]) || 0, ean: String(r[10] || '') })) : [];
-  return { catering: catering, foods: foods };
+  const dl = ss.getSheetByName(SH.DAILY);
+  const daily = dl && dl.getLastRow() > 1 ? dl.getRange(2, 1, dl.getLastRow() - 1, 3).getValues().filter(r => r[0] && inR(key_(r[0])))
+    .map(r => ({ date: key_(r[0]), steps: r[1] === '' ? null : Number(r[1]), sleep: r[2] === '' ? null : Number(r[2]) })) : [];
+  return { catering: catering, foods: foods, daily: daily };
 }
 
 function colorDays_(tr) {
@@ -475,3 +488,139 @@ function pullAll_(ss) {
 }
 
 function json_(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
+
+
+/* ================= KROKI I SEN ================= */
+function numIn_(v) { if (v === undefined || v === null || v === '') return null; const n = parseFloat(String(v).replace(/\s/g, '').replace(',', '.')); return isNaN(n) ? null : n; }
+function upsertDaily_(ss, date, d) {
+  const sh = ss.getSheetByName(SH.DAILY); if (!sh || !date) return;
+  const steps = numIn_(d.steps), sleep = numIn_(d.sleep);
+  const n = sh.getLastRow() - 1;
+  if (n > 0) {
+    const vals = sh.getRange(2, 1, n, 1).getValues();
+    for (let i = 0; i < n; i++) if (key_(vals[i][0]) === date) {
+      if (steps !== null) sh.getRange(i + 2, 2).setValue(Math.round(steps));
+      if (sleep !== null) sh.getRange(i + 2, 3).setValue(sleep);
+      return;
+    }
+  }
+  sh.appendRow([toDate_(date), steps === null ? '' : Math.round(steps), sleep === null ? '' : sleep]);
+  if (sh.getLastRow() > 2) sh.getRange(2, 1, sh.getLastRow() - 1, 3).sort({ column: 1, ascending: true });
+}
+
+/* ================= RAPORT TYGODNIOWY ================= */
+function installReportTrigger() {
+  ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === 'sendWeeklyReport').forEach(t => ScriptApp.deleteTrigger(t));
+  ScriptApp.newTrigger('sendWeeklyReport').timeBased().onWeekDay(ScriptApp.WeekDay.SUNDAY).atHour(21).nearMinute(0).inTimezone(TZ).create();
+  try { SpreadsheetApp.getUi().alert('Raport włączony', 'Mail z podsumowaniem tygodnia pójdzie w każdą niedzielę ok. 21:00 na ' + REPORT_TO + '.', SpreadsheetApp.getUi().ButtonSet.OK); } catch (e) {}
+}
+
+function rows_(ss, name, cols) { const sh = ss.getSheetByName(name); return sh && sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, cols).getValues() : []; }
+function avg_(a) { const b = a.filter(x => typeof x === 'number' && !isNaN(x)); return b.length ? b.reduce((x, y) => x + y, 0) / b.length : null; }
+function f1_(n, d) { if (n === null || n === undefined || isNaN(n)) return '–'; return Number(n).toFixed(d === undefined ? 1 : d).replace('.', ','); }
+
+function weekStats_(ss) {
+  const now = new Date();
+  const todayK = Utilities.formatDate(now, TZ, 'yyyy-MM-dd');
+  const t = toDate_(todayK); const dow = (t.getDay() + 6) % 7;
+  const mon = new Date(t.getTime() - dow * 864e5), sun = new Date(mon.getTime() + 6 * 864e5);
+  const K = d => Utilities.formatDate(d, TZ, 'yyyy-MM-dd');
+  const from = K(mon), to = K(sun), pFrom = K(new Date(mon.getTime() - 7 * 864e5)), pTo = K(new Date(mon.getTime() - 864e5));
+  const inW = k => k >= from && k <= to, inP = k => k >= pFrom && k <= pTo;
+  // waga
+  const W = rows_(ss, SH.WEIGHT, 2).filter(r => r[0]).map(r => ({ k: key_(r[0]), kg: Number(r[1]) }));
+  const wNow = avg_(W.filter(x => inW(x.k)).map(x => x.kg)), wPrev = avg_(W.filter(x => inP(x.k)).map(x => x.kg));
+  const wLast = W.length ? W[W.length - 1].kg : null;
+  // treningi
+  const TR = rows_(ss, SH.TRAIN, 8).filter(r => r[0] && inW(key_(r[1])));
+  const SE = rows_(ss, SH.SETS, 10).filter(r => r[0]);
+  const seW = SE.filter(r => inW(key_(r[1])));
+  const muscles = {}; seW.forEach(r => { const m = MUSCLE[r[9]] || 'Inne'; muscles[m] = (muscles[m] || 0) + 1; });
+  const best = {}, bestBefore = {};
+  SE.forEach(r => { const k = key_(r[1]); const e = Number(r[7]) || 0; const ex = r[3];
+    if (inW(k)) { if (!best[ex] || e > best[ex].e) best[ex] = { e: e, kg: r[5], reps: r[6] }; }
+    else if (k < from) bestBefore[ex] = Math.max(bestBefore[ex] || 0, e); });
+  const prs = Object.keys(best).filter(ex => bestBefore[ex] && best[ex].e > bestBefore[ex] + 0.01)
+    .map(ex => ({ ex: ex, kg: best[ex].kg, reps: best[ex].reps, d: best[ex].e - bestBefore[ex] })).sort((a, b) => b.d - a.d);
+  // dieta (tylko dni do dziś)
+  const D = rows_(ss, SH.DIET, 3).filter(r => r[0] && inW(key_(r[0])) && key_(r[0]) <= todayK && Number(r[1]) > 0);
+  const kcal = avg_(D.map(r => Number(r[1]))), prot = avg_(D.map(r => Number(r[2])));
+  // kroki i sen
+  const DL = rows_(ss, SH.DAILY, 3).filter(r => r[0] && inW(key_(r[0])));
+  const steps = avg_(DL.map(r => r[1] === '' ? NaN : Number(r[1]))), sleep = avg_(DL.map(r => r[2] === '' ? NaN : Number(r[2])));
+  // pomiary
+  const M = rows_(ss, SH.MEAS, 8).filter(r => r[0]);
+  // komentarz trenera
+  const REP = ss.getSheetByName(SH.REP); let coach = null, coachRow = null;
+  if (REP && REP.getLastRow() > 1) REP.getRange(2, 1, REP.getLastRow() - 1, 5).getValues().forEach((r, i) => { if (r[0] && key_(r[0]) === from) { coach = { text: String(r[2] || ''), tips: String(r[3] || '') }; coachRow = i + 2; } });
+  return { from: from, to: to, mon: mon, sun: sun, wNow: wNow, wPrev: wPrev, wLast: wLast, wDays: W.filter(x => inW(x.k)).length,
+    trainings: TR.map(r => ({ day: r[2], date: key_(r[1]), sets: r[6], vol: r[7], min: r[5] })), sets: seW.length, vol: seW.reduce((a, r) => a + (Number(r[8]) || 0), 0),
+    muscles: muscles, prs: prs, kcal: kcal, prot: prot, dietDays: D.length, steps: steps, sleep: sleep, dailyDays: DL.length,
+    lastMeas: M.length ? M[M.length - 1] : null, firstMeas: M.length ? M[0] : null, coach: coach, coachRow: coachRow };
+}
+
+function sendWeeklyReport() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet() || SpreadsheetApp.openById(PropertiesService.getScriptProperties().getProperty('SSID'));
+  const st = weekStats_(ss);
+  const html = reportHtml_(st, ss.getUrl());
+  const fmt = d => Utilities.formatDate(d, TZ, 'd.MM');
+  MailApp.sendEmail({ to: REPORT_TO, subject: 'Żelazny Dziennik · tydzień ' + fmt(st.mon) + ' do ' + fmt(st.sun), htmlBody: html, name: 'Żelazny Dziennik' });
+  if (st.coachRow) ss.getSheetByName(SH.REP).getRange(st.coachRow, 5).setValue(new Date());
+}
+
+function esc_(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+function reportHtml_(st, sheetUrl) {
+  const NAVY = '#00283D', BLUE = '#0079C2', PINK = '#EE1264', TEAL = '#00B8C7', MUTED = '#5B6770', LINE = '#E3E7EA', BG = '#F5F5F5';
+  const font = "font-family:'Source Sans 3','Source Sans Pro',Arial,sans-serif;";
+  const fmt = d => Utilities.formatDate(d, TZ, 'd MMM');
+  const rate = (st.wNow !== null && st.wPrev !== null) ? st.wNow - st.wPrev : null;
+  let rateTxt = 'za mało danych', rateCol = MUTED;
+  if (rate !== null) { if (rate < 0.2) { rateTxt = 'za wolno'; rateCol = '#B26B00'; } else if (rate <= 0.35) { rateTxt = 'w celu'; rateCol = BLUE; } else if (rate <= 0.5) { rateTxt = 'szybko'; rateCol = '#B26B00'; } else { rateTxt = 'za szybko'; rateCol = PINK; } }
+  const tile = (label, value, sub, col) => '<td width="33%" style="padding:6px;vertical-align:top"><div style="background:#fff;border:1px solid ' + LINE + ';padding:12px 12px 10px">'
+    + '<div style="' + font + 'font-size:11px;color:' + MUTED + ';text-transform:uppercase;letter-spacing:.06em;font-weight:700">' + label + '</div>'
+    + '<div style="' + font + 'font-size:26px;font-weight:800;color:' + (col || NAVY) + ';line-height:1.2;margin-top:2px">' + value + '</div>'
+    + '<div style="' + font + 'font-size:12px;color:' + MUTED + '">' + sub + '</div></div></td>';
+  const h3 = t => '<div style="' + font + 'font-size:17px;font-weight:800;color:' + NAVY + ';margin:22px 0 8px">' + t + '</div>';
+  let h = '<div style="background:' + BG + ';padding:16px 0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto;background:' + BG + '"><tr><td style="padding:0 10px">';
+  h += '<div style="background:' + NAVY + ';padding:18px 18px 16px;border-bottom:4px solid ' + PINK + '"><div style="' + font + 'color:#B9C7D0;font-size:12px;letter-spacing:.08em;text-transform:uppercase;font-weight:700">Raport tygodnia</div>'
+    + '<div style="' + font + 'color:#fff;font-size:24px;font-weight:800;margin-top:2px">Żelazny Dziennik</div><div style="' + font + 'color:#B9C7D0;font-size:14px">' + fmt(st.mon) + ' do ' + fmt(st.sun) + '</div></div>';
+  // kafle
+  h += '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px"><tr>'
+    + tile('Waga śr.', f1_(st.wNow) + ' kg', st.wDays + ' wpisów' + (st.wLast ? ', ostatni ' + f1_(st.wLast) : ''))
+    + tile('Tempo', rate === null ? '–' : (rate > 0 ? '+' : '') + f1_(rate, 2) + ' kg', '<span style="color:' + rateCol + ';font-weight:700">' + rateTxt + '</span> · cel 0,2 do 0,35', rateCol)
+    + tile('Treningi', st.trainings.length + ' / 5', st.sets + ' serii · ' + f1_(st.vol / 1000) + ' t') + '</tr><tr>'
+    + tile('Kalorie śr.', st.kcal === null ? '–' : Math.round(st.kcal), 'cel 3300 · ' + st.dietDays + ' dni')
+    + tile('Białko śr.', st.prot === null ? '–' : Math.round(st.prot) + ' g', 'cel 170 g', st.prot !== null && st.prot < 170 ? PINK : NAVY)
+    + tile('Kroki · sen', st.steps === null ? '–' : Math.round(st.steps).toLocaleString('pl-PL'), 'sen śr. ' + (st.sleep === null ? '–' : f1_(st.sleep) + ' h')) + '</tr></table>';
+  // komentarz trenera
+  if (st.coach && st.coach.text) {
+    h += h3('Komentarz trenera') + '<div style="background:#fff;border:1px solid ' + LINE + ';border-left:4px solid ' + BLUE + ';padding:14px 16px">'
+      + st.coach.text.split(/\n+/).filter(Boolean).map(p => '<p style="' + font + 'font-size:15px;line-height:1.5;color:#1D1D1D;margin:0 0 10px">' + esc_(p) + '</p>').join('');
+    const tips = st.coach.tips.split(/\n+/).map(x => x.replace(/^[-•\d.\s]+/, '').trim()).filter(Boolean);
+    if (tips.length) h += '<div style="' + font + 'font-size:12px;font-weight:700;color:' + PINK + ';text-transform:uppercase;letter-spacing:.06em;margin:4px 0 6px">Na ten tydzień</div>'
+      + tips.map(x => '<div style="' + font + 'font-size:15px;line-height:1.45;color:' + NAVY + ';padding:6px 0;border-top:1px solid ' + LINE + '">→ ' + esc_(x) + '</div>').join('');
+    h += '</div>';
+  }
+  // treningi
+  h += h3('Treningi');
+  if (st.trainings.length) h += '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#fff;border:1px solid ' + LINE + '">'
+    + st.trainings.map(t => '<tr><td style="' + font + 'padding:9px 12px;border-bottom:1px solid ' + LINE + ';font-weight:700;color:' + NAVY + '">' + esc_(t.day) + '</td><td style="' + font + 'padding:9px 12px;border-bottom:1px solid ' + LINE + ';color:' + MUTED + '">' + Utilities.formatDate(toDate_(t.date), TZ, 'EEE d.MM') + '</td><td style="' + font + 'padding:9px 12px;border-bottom:1px solid ' + LINE + ';text-align:right;color:#1D1D1D">' + t.sets + ' serii · ' + t.min + ' min</td></tr>').join('') + '</table>';
+  else h += '<div style="' + font + 'color:' + MUTED + ';background:#fff;border:1px dashed ' + LINE + ';padding:12px">Brak zapisanych treningów w tym tygodniu.</div>';
+  // partie
+  const order = ['Klatka', 'Plecy', 'Barki', 'Biceps', 'Triceps', 'Nogi'];
+  const maxM = Math.max(1, ...order.map(m => st.muscles[m] || 0));
+  if (st.sets) h += h3('Serie na partie') + '<div style="background:#fff;border:1px solid ' + LINE + ';padding:10px 14px">' + order.map(m => { const n = st.muscles[m] || 0; const col = (m === 'Biceps' || m === 'Triceps') ? PINK : BLUE;
+    return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:5px 0"><tr><td width="80" style="' + font + 'font-size:13px;color:' + NAVY + ';font-weight:700">' + m + '</td><td><div style="background:' + BG + ';height:10px"><div style="background:' + col + ';height:10px;width:' + Math.round(n / maxM * 100) + '%"></div></div></td><td width="36" style="' + font + 'font-size:13px;text-align:right;color:#1D1D1D">' + n + '</td></tr></table>'; }).join('')
+    + '<div style="' + font + 'font-size:12px;color:' + MUTED + ';margin-top:4px">Priorytet bloku: ramiona (różowe), cel ok. 14 serii tygodniowo na biceps i triceps.</div></div>';
+  // rekordy
+  if (st.prs.length) h += h3('Rekordy tygodnia') + '<div style="background:#fff;border:1px solid ' + LINE + ';padding:4px 14px">' + st.prs.slice(0, 6).map(p => '<div style="' + font + 'font-size:15px;padding:8px 0;border-bottom:1px solid ' + LINE + '"><b style="color:' + NAVY + '">' + esc_(p.ex) + '</b> · ' + f1_(p.kg) + ' kg × ' + p.reps + ' <span style="color:' + TEAL + ';font-weight:700">+' + f1_(p.d) + ' kg e1RM</span></div>').join('') + '</div>';
+  // pomiary
+  if (st.lastMeas) { const L = st.lastMeas, F = st.firstMeas; const nm = ['Ramię', 'Przedramię', 'Klatka', 'Talia', 'Udo', 'Łydka'];
+    h += h3('Ostatnie pomiary · ' + Utilities.formatDate(L[0], TZ, 'd.MM')) + '<div style="background:#fff;border:1px solid ' + LINE + ';padding:10px 14px;' + font + 'font-size:14px;color:#1D1D1D">'
+      + nm.map((n, i) => L[i + 1] === '' ? '' : n + ' <b>' + f1_(Number(L[i + 1])) + '</b>' + (F && F[i + 1] !== '' && F !== L ? ' <span style="color:' + MUTED + '">(' + ((L[i + 1] - F[i + 1]) >= 0 ? '+' : '') + f1_(L[i + 1] - F[i + 1]) + ')</span>' : '')).filter(Boolean).join(' · ') + '</div>'; }
+  h += '<div style="text-align:center;margin:24px 0 8px"><a href="' + APP_URL + '" style="' + font + 'display:inline-block;background:' + NAVY + ';color:#fff;text-decoration:none;font-weight:700;padding:12px 26px;border-radius:999px">Otwórz apkę</a></div>'
+    + '<div style="' + font + 'text-align:center;font-size:12px;color:' + MUTED + '"><a href="' + sheetUrl + '" style="color:' + BLUE + '">Arkusz z danymi</a> · raport wysyła się w każdą niedzielę</div>';
+  h += '</td></tr></table></div>';
+  return h;
+}
