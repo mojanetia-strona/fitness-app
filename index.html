@@ -123,7 +123,7 @@ h3{font-weight:700;font-size:18px;color:var(--navy);margin:26px 0 10px}
 
 .tabs{position:fixed;left:0;right:0;bottom:0;z-index:7;background:color-mix(in srgb,var(--surface) 92%,transparent);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border-top:1px solid var(--line);
   padding-bottom:env(safe-area-inset-bottom,0px);padding-left:max(8px,env(safe-area-inset-left,0px));padding-right:max(8px,env(safe-area-inset-right,0px))}
-.tabs .in{max-width:540px;margin:0 auto;display:grid;grid-template-columns:repeat(4,1fr)}
+.tabs .in{max-width:540px;margin:0 auto;display:grid;grid-template-columns:repeat(5,1fr)}
 .tabs button{border:0;background:none;height:58px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:11px;font-weight:500;color:var(--muted)}
 .tabs button svg{width:22px;height:22px}
 .tabs button[aria-current="page"]{color:var(--navy);font-weight:700;box-shadow:inset 0 3px 0 var(--pink)}
@@ -160,6 +160,36 @@ h3{font-weight:700;font-size:18px;color:var(--navy);margin:26px 0 10px}
 .summary h3{margin:0 0 4px;color:#fff;font-size:18px}
 .note{font-size:12.5px;color:var(--muted)}
 .empty{background:var(--surface);border:1px dashed var(--line);padding:18px;text-align:center;color:var(--muted);font-size:14px}
+/* dieta */
+.dnav{display:flex;align-items:center;gap:8px;margin:14px 0 6px}
+.dnav h2{margin:0;flex:1}
+.dnav button{width:40px;height:40px;border-radius:50%;border:1.5px solid var(--line);background:var(--surface);font-size:18px;color:var(--navy)}
+.dnav .today{width:auto;border-radius:999px;padding:0 14px;font-size:13px;font-weight:700}
+.dsum{background:var(--navy);color:#fff;padding:16px}
+.dsum .big{font-weight:800;font-size:34px;line-height:1;font-variant-numeric:tabular-nums}
+.dsum .big small{font-size:15px;font-weight:600;opacity:.75;margin-left:4px}
+.dsum .bar{height:6px;background:rgba(255,255,255,.18);border-radius:99px;overflow:hidden;margin:10px 0 12px}
+.dsum .bar i{display:block;height:100%;background:#00B8C7;border-radius:99px}
+.dsum .bar i.over{background:var(--pink)}
+.dsum .mac{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;font-size:12px;color:#B9C7D0}
+.dsum .mac b{display:block;color:#fff;font-size:17px;font-variant-numeric:tabular-nums}
+.meal{display:flex;gap:12px;align-items:flex-start;padding:12px 0;border-bottom:1px solid var(--line)}
+.meal:last-child{border-bottom:0}
+.meal .t{flex:1;min-width:0}
+.meal .k{font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.06em}
+.meal .n{display:block;font-weight:600;color:var(--navy);line-height:1.3}
+.meal .m{display:block;font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.meal.off .n,.meal.off .m{opacity:.45;text-decoration:line-through}
+.meal .chk{flex:none;margin-top:2px}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.chip{border:1.5px solid var(--line);background:var(--surface);border-radius:999px;padding:6px 12px;font-size:13px;font-weight:600;color:var(--navy)}
+.scan{position:fixed;inset:0;z-index:20;background:rgba(0,20,30,.92);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;
+  padding:max(16px,env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) max(16px,env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
+.scan #reader{width:100%;max-width:420px;background:#000;min-height:240px}
+.scan p{color:#fff;margin:0;text-align:center}
+.scan .row{justify-content:center}
+.scan .btn{border-color:#fff;color:#fff}
+.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 
@@ -179,8 +209,13 @@ h3{font-weight:700;font-size:18px;color:var(--navy);margin:26px 0 10px}
     <div class="bar" id="restbar"></div></div>
 </div>
 
+<div class="scan" id="scan" hidden>
+  <p><b>Skanuj kod kreskowy</b></p><div id="reader"></div><p class="note" id="scanmsg" style="color:#B9C7D0">Nakieruj aparat na kod produktu</p>
+  <div class="row"><input id="eanin" inputmode="numeric" placeholder="lub wpisz kod" style="height:44px;border:0;padding:0 12px;font-size:16px;width:170px"><button class="btn" data-a="eanGo">Szukaj</button><button class="btn" data-a="scanClose">Zamknij</button></div>
+</div>
 <nav class="tabs" aria-label="Sekcje"><div class="in">
   <button data-a="nav" data-v="train"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 7v10M3 9v6M18 7v10M21 9v6M6 12h12"/></svg>Trening</button>
+  <button data-a="nav" data-v="diet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M7 3v8a2 2 0 0 0 2 2v8M5 3v5M9 3v5M17 21V3c-2 0-4 3-4 7s2 4 4 4"/></svg>Dieta</button>
   <button data-a="nav" data-v="weight"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="4"/><path d="M8.5 9.5a5 5 0 0 1 7 0L12 12.5"/></svg>Waga</button>
   <button data-a="nav" data-v="measure"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="2.5" y="8" width="19" height="8" rx="2"/><path d="M7 8v3M11 8v4M15 8v3M19 8v4"/></svg>Pomiary</button>
   <button data-a="nav" data-v="progress"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 20h18M5 16l4-5 4 3 6-8"/></svg>Postępy</button>
@@ -222,6 +257,7 @@ const PLAN = [
     {id:'calf',    name:'Wspięcia na palce stojąc',              sets:3, reps:[12,15], rest:60,  inc:5}]}
 ];
 const GOAL = {start:85, target:90.5, rateLo:0.2, rateHi:0.35};
+const DGOAL = {kcal:3000, p:170};
 const MEAS = [{k:'arm',l:'Ramię'},{k:'forearm',l:'Przedramię'},{k:'chest',l:'Klatka'},{k:'waist',l:'Talia'},{k:'thigh',l:'Udo'},{k:'calf',l:'Łydka'}];
 
 /* ============ helpers ============ */
@@ -245,9 +281,9 @@ const esc = s => String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&g
 
 /* ============ state ============ */
 const KEY='zd_state_v1';
-const fresh = () => ({v:1, view:'train', workouts:[], weights:[], measures:[], active:null, queue:[], settings:{url:'',token:''}, lastSync:null, syncErr:null, summary:null, demo:false, progEx:'bench'});
+const fresh = () => ({v:1, view:'train', workouts:[], weights:[], measures:[], active:null, queue:[], settings:{url:'',token:''}, lastSync:null, syncErr:null, summary:null, demo:false, progEx:'bench', diet:{catering:{}, foods:[], fetched:null, eat:{}, favs:[], products:{}}, dietDate:null});
 let S;
-function load(){ try{ const r=localStorage.getItem(KEY); return r?Object.assign(fresh(),JSON.parse(r)):null; }catch(e){ return null; } }
+function load(){ try{ const r=localStorage.getItem(KEY); if(!r) return null; const o=Object.assign(fresh(),JSON.parse(r)); o.diet=Object.assign(fresh().diet,o.diet||{}); return o; }catch(e){ return null; } }
 function save(){ try{ localStorage.setItem(KEY,JSON.stringify(S)); }catch(e){} }
 
 /* ============ data access ============ */
@@ -490,6 +526,97 @@ V.progress = () => {
   <h3>Sesje</h3><div class="panel scroll"><table class="mtable"><thead><tr><th>Data</th><th>Najlepsza seria</th><th>e1RM</th><th>Serie</th></tr></thead><tbody>${sessions.slice().reverse().slice(0,15).map(s=>`<tr><td>${fD(s.date)}</td><td>${fN(s.best.kg)} × ${s.best.reps}</td><td>${fN(s.e1,1)}</td><td>${s.n}</td></tr>`).join('')}</tbody></table></div>`;
   return h;
 };
+/* ============ dieta ============ */
+const MEALNAME = {'ŚNIADANIE':'Śniadanie','II ŚNIADANIE':'II śniadanie','OBIAD':'Obiad','PODWIECZOREK':'Podwieczorek','KOLACJA':'Kolacja','LUNCH':'Lunch','PRZEKĄSKA':'Przekąska'};
+const addDays = (s,n) => ymd(dParse(s).getTime()+n*864e5);
+let dietFetching=false;
+async function fetchDiet(force){
+  const st=S.settings; if(!st.url || dietFetching) return; if(!force && S.diet.fetched && Date.now()-S.diet.fetched<20*60000) return;
+  if(navigator.onLine===false) return; dietFetching=true;
+  try{ const t=today(); const r=await fetch(st.url+'?action=diet&from='+addDays(t,-7)+'&to='+addDays(t,14)+'&token='+encodeURIComponent(st.token)); const j=await r.json();
+    if(j.ok){ const cat={}; j.catering.forEach(m=>{ (cat[m.date]=cat[m.date]||[]).push(m); });
+      Object.keys(S.diet.catering).forEach(d=>{ if(!cat[d] && (d<addDays(t,-7)||d>addDays(t,14))) cat[d]=S.diet.catering[d]; });
+      S.diet.catering=cat;
+      const pend=new Set(S.queue.filter(q=>q.type==='eat').map(q=>q.key));
+      Object.keys(S.diet.eat).forEach(k=>{ if(!pend.has('eat:'+k)) delete S.diet.eat[k]; });
+      const have=new Set(S.diet.foods.map(f=>f.id)); const delPend=new Set(S.queue.filter(q=>q.type==='delFood').map(q=>q.data.id));
+      j.foods.forEach(f=>{ if(!have.has(f.id) && !delPend.has(f.id)) S.diet.foods.push(f); });
+      S.diet.fetched=Date.now(); save(); if(S.view==='diet') render(); }
+  }catch(e){}
+  dietFetching=false;
+}
+function isEaten(date,m){ const k=date+'|'+m.meal; return (k in S.diet.eat) ? S.diet.eat[k] : (m.eaten!==false); }
+function dayTotals(date){
+  const t={kcal:0,p:0,c:0,f:0}; (S.diet.catering[date]||[]).forEach(m=>{ if(isEaten(date,m)){ t.kcal+=m.kcal; t.p+=m.p||0; t.c+=m.c||0; t.f+=m.f||0; } });
+  S.diet.foods.filter(f=>f.date===date).forEach(f=>{ t.kcal+=+f.kcal||0; t.p+=+f.p||0; t.c+=+f.c||0; t.f+=+f.f||0; }); return t;
+}
+let draft=null; // {per100:{kcal,p,c,f}|null, ean, name}
+V.diet = () => {
+  const d=S.dietDate||today(); const t=dayTotals(d); const cat=S.diet.catering[d]||[]; const foods=S.diet.foods.filter(f=>f.date===d).sort((a,b)=>(a.time||0)-(b.time||0));
+  const pk=Math.min(100,t.kcal/DGOAL.kcal*100), pp=Math.min(100,t.p/DGOAL.p*100);
+  let h=`<div class="dnav"><button data-a="dday" data-v="-1" aria-label="Poprzedni dzień">‹</button><h2>${d===today()?'Dziś':fD(d)}</h2>${d!==today()?'<button class="today" data-a="dday" data-v="0">Dziś</button>':''}<button data-a="dday" data-v="1" aria-label="Następny dzień">›</button></div>
+  <div class="dsum"><div class="row" style="justify-content:space-between;align-items:flex-end"><div class="big">${Math.round(t.kcal)}<small>/ ${DGOAL.kcal} kcal</small></div><div style="text-align:right;font-size:12px;color:#B9C7D0">${t.kcal<DGOAL.kcal?'zostało '+Math.round(DGOAL.kcal-t.kcal):'ponad '+Math.round(t.kcal-DGOAL.kcal)} kcal</div></div>
+    <div class="bar"><i style="width:${pk.toFixed(0)}%"${t.kcal>DGOAL.kcal*1.1?' class="over"':''}></i></div>
+    <div class="mac"><div>Białko<b>${Math.round(t.p)} / ${DGOAL.p} g</b></div><div>Węgle<b>${Math.round(t.c)} g</b></div><div>Tłuszcz<b>${Math.round(t.f)} g</b></div></div>
+    <div class="bar" style="margin-bottom:0"><i style="width:${pp.toFixed(0)}%;background:#A6CE3A"></i></div></div>`;
+  h+=`<h3>Catering${cat[0]&&cat[0].diet?' · '+esc(String(cat[0].diet).replace(/^Dieta\s*/,'')):''}</h3>`;
+  if(cat.length){ h+=`<div class="panel list" style="padding-block:0">${cat.map((m,i)=>{ const on=isEaten(d,m); return `<div class="meal${on?'':' off'}"><button class="chk${on?' on':''}" data-a="eat" data-i="${i}" aria-label="${on?'Zjedzone':'Nie zjedzone'}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></button>
+      <div class="t"><span class="k">${esc(MEALNAME[m.meal]||m.meal)}</span><span class="n">${esc(m.name)}</span><span class="m">${Math.round(m.kcal)} kcal · B ${fN(m.p,0)} · W ${fN(m.c,0)} · T ${fN(m.f,0)}</span></div></div>`; }).join('')}</div>
+      <p class="note">Odznacz posiłek, którego nie zjadłeś.</p>`; }
+  else h+=`<div class="empty">Brak menu cateringu na ten dzień. Menu zaczytuję w poniedziałki, a w razie potrzeby napisz do Claude „zaczytaj catering”.</div>`;
+  h+=`<h3>Dodatkowe</h3>`;
+  if(foods.length) h+=`<div class="panel list">${foods.map(f=>`<div class="li"><span class="d">${f.time?new Date(f.time).toLocaleTimeString('pl-PL',{hour:'2-digit',minute:'2-digit'}):''}</span><span class="v" style="font-size:15px">${esc(f.name)}<span class="note" style="display:block;font-weight:400">${f.amount?fN(f.amount,0)+' g · ':''}${Math.round(f.kcal)} kcal · B ${fN(f.p,0)} g</span></span><button class="x" data-a="delFood" data-v="${f.id}" data-confirm="1">Usuń</button></div>`).join('')}</div>`;
+  h+=`<div class="row mt"><button class="btn primary" style="flex:1" data-a="scanOpen">Skanuj kod</button><button class="btn" style="flex:1" data-a="foodForm">Dodaj ręcznie</button></div>`;
+  if(draft) h+=foodForm();
+  const favs=S.diet.favs.slice(0,10);
+  if(favs.length && !draft) h+=`<div class="chips">${favs.map((f,i)=>`<button class="chip" data-a="fav" data-i="${i}">+ ${esc(f.name)} · ${Math.round(f.kcal)}</button>`).join('')}</div><p class="note">Stuknij, żeby dodać ponownie.</p>`;
+  h+=`<p class="note mt">${S.diet.fetched?'Menu pobrane '+new Date(S.diet.fetched).toLocaleString('pl-PL',{day:'numeric',month:'numeric',hour:'2-digit',minute:'2-digit'}):'Menu jeszcze nie pobrane'} · <a href="#" data-a="dietRefresh" style="color:var(--accent)">odśwież</a></p>`;
+  return h;
+};
+function foodForm(){
+  const p=draft.per100;
+  return `<div class="panel mt" id="ffp"><div class="field"><label class="label" for="fname">Nazwa</label><input id="fname" value="${esc(draft.name||'')}" placeholder="np. Coca-Cola 0,5 l"></div>
+  ${p?`<p class="note" style="margin:8px 0 0">Na 100 g/ml: ${Math.round(p.kcal)} kcal · B ${fN(p.p)} · W ${fN(p.c)} · T ${fN(p.f)}</p>`:''}
+  <div class="field mt"><label class="label" for="famt">Ilość (g lub ml)${p?'':' , opcjonalnie'}</label><input id="famt" inputmode="decimal" value="${draft.amount?fN(draft.amount,0):''}" data-calc="1"></div>
+  <div class="grid4 mt"><div class="field"><label class="label" for="fkcal">kcal</label><input id="fkcal" inputmode="decimal" value="${draft.kcal!=null?Math.round(draft.kcal):''}"></div>
+  <div class="field"><label class="label" for="fp">B</label><input id="fp" inputmode="decimal" value="${draft.p!=null?fN(draft.p):''}"></div>
+  <div class="field"><label class="label" for="fc">W</label><input id="fc" inputmode="decimal" value="${draft.c!=null?fN(draft.c):''}"></div>
+  <div class="field"><label class="label" for="ff">T</label><input id="ff" inputmode="decimal" value="${draft.f!=null?fN(draft.f):''}"></div></div>
+  <div class="row mt"><button class="btn primary" style="flex:1" data-a="foodSave">Dodaj</button><button class="btn ghost" data-a="foodCancel">Anuluj</button></div></div>`;
+}
+function calcDraft(){ if(!draft||!draft.per100) return; const a=num($('#famt').value)||0; const p=draft.per100; draft.amount=a;
+  [['fkcal','kcal',0],['fp','p',1],['fc','c',1],['ff','f',1]].forEach(([id,k,dg])=>{ draft[k]=p[k]*a/100; $('#'+id).value=dg?fN(draft[k]):Math.round(draft[k]); }); }
+function addFoodEntry(f){
+  const e=Object.assign({id:uid(), date:S.dietDate||today(), time:Date.now(), source:'Ręcznie'}, f);
+  S.diet.foods.push(e); enqueue('food', e, 'fd:'+e.id);
+  const fav={name:e.name, kcal:e.kcal, p:e.p, c:e.c, f:e.f, amount:e.amount||'', ean:e.ean||'', source:e.source};
+  S.diet.favs=[fav].concat(S.diet.favs.filter(x=>x.name!==e.name)).slice(0,20); save();
+}
+let scanner=null;
+function loadScript(src){ return new Promise((ok,err)=>{ const s=document.createElement('script'); s.src=src; s.onload=ok; s.onerror=err; document.head.appendChild(s); }); }
+async function openScanner(){
+  $('#scan').hidden=false; $('#scanmsg').textContent='Uruchamiam aparat…'; $('#eanin').value='';
+  try{ if(!window.Html5Qrcode) await loadScript('https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js');
+    const F=window.Html5QrcodeSupportedFormats; scanner=new Html5Qrcode('reader',{formatsToSupport:[F.EAN_13,F.EAN_8,F.UPC_A,F.UPC_E,F.QR_CODE,F.CODE_128],verbose:false});
+    await scanner.start({facingMode:'environment'},{fps:10,qrbox:{width:260,height:150}},code=>{ closeScanner(); lookupEan(code); },()=>{});
+    $('#scanmsg').textContent='Nakieruj aparat na kod produktu'; }
+  catch(e){ $('#scanmsg').textContent='Nie mam dostępu do aparatu. Wpisz kod ręcznie albo zezwól na aparat w ustawieniach Safari.'; }
+}
+async function closeScanner(){ $('#scan').hidden=true; try{ if(scanner){ await scanner.stop(); scanner.clear(); } }catch(e){} scanner=null; }
+async function lookupEan(code){
+  code=String(code).replace(/\D/g,''); if(!code) return;
+  S.view='diet'; draft={name:'Szukam produktu…', ean:code}; render();
+  let p=S.diet.products[code];
+  if(!p){ try{ const r=await fetch('https://world.openfoodfacts.org/api/v2/product/'+code+'.json?fields=product_name,product_name_pl,brands,nutriments,serving_quantity,product_quantity');
+      const j=await r.json(); if(j.status===1&&j.product){ const n=j.product.nutriments||{}; const kcal=n['energy-kcal_100g']!=null?n['energy-kcal_100g']:(n['energy_100g']!=null?n['energy_100g']/4.184:null);
+        if(kcal!=null){ p={name:[j.product.brands&&j.product.brands.split(',')[0],j.product.product_name_pl||j.product.product_name].filter(Boolean).join(' ').trim()||('Produkt '+code), per100:{kcal:+kcal,p:+(n.proteins_100g||0),c:+(n.carbohydrates_100g||0),f:+(n.fat_100g||0)}, amount:+(j.product.serving_quantity||j.product.product_quantity||100)}; S.diet.products[code]=p; save(); } } }
+    catch(e){} }
+  if(p){ draft={name:p.name, ean:code, per100:p.per100, amount:p.amount, source:'Skaner'}; draft.kcal=p.per100.kcal*p.amount/100; draft.p=p.per100.p*p.amount/100; draft.c=p.per100.c*p.amount/100; draft.f=p.per100.f*p.amount/100; }
+  else draft={name:'', ean:code, source:'Skaner', notFound:true};
+  render(); if(draft&&draft.notFound){ const el=$('#fname'); if(el){ el.placeholder='Nie znalazłem produktu, wpisz nazwę'; el.focus(); } }
+  const ffp=$('#ffp'); if(ffp) ffp.scrollIntoView({block:'center'});
+}
+
 V.settings = () => {
   const st=S.settings;
   return `<h2>Ustawienia</h2><p class="lede">Połączenie z Twoim arkuszem Google. Dane zawsze są najpierw na telefonie.</p>
@@ -515,12 +642,12 @@ function render(){
 function rerenderCard(i){ const el=document.querySelector(`[data-card="${i}"]`); if(el) el.outerHTML=exCard(i); const a=S.active; if(a){ const c=$('#wkcount'); if(c) c.textContent=a.ex.reduce((n,e)=>n+e.sets.filter(s=>s.done).length,0)+'/'+a.ex.reduce((n,e)=>n+e.sets.length,0); } }
 function tickElapsed(){ const el=$('#elapsed'); if(el&&S.active) el.textContent=mmss((Date.now()-S.active.start)/1000); }
 setInterval(()=>{ tickElapsed(); tickRest(); },1000);
-setInterval(()=>{ if(S.queue.length) sync(); },60000);
-window.addEventListener('online',()=>sync());
+setInterval(()=>{ if(S.queue.length) sync(); fetchDiet(); },60000);
+window.addEventListener('online',()=>{ sync(); fetchDiet(true); });
 
 /* ============ actions ============ */
 const A = {
-  nav(b){ const v=b.dataset.v; if(v==='train' && S.active) S.view='workout'; else S.view=v; save(); render(); window.scrollTo(0,0); },
+  nav(b){ const v=b.dataset.v; if(v==='train' && S.active) S.view='workout'; else S.view=v; if(v==='diet'){ S.dietDate=today(); draft=null; fetchDiet(); } save(); render(); window.scrollTo(0,0); },
   start(b){ if(S.active && S.active.dayId!==b.dataset.v){ S.view='workout'; render(); return; } if(S.active){ S.view='workout'; render(); return; } startWorkout(b.dataset.v); window.scrollTo(0,0); },
   tick(b){ unlockAudio(); const i=+b.dataset.i, j=+b.dataset.j; const s=S.active.ex[i].sets[j]; s.done=!s.done; s.ts=Date.now(); save(); rerenderCard(i);
     if(s.done){ const d=EX[S.active.ex[i].exId]; const lastEx=i===S.active.ex.length-1 && S.active.ex[i].sets.every(x=>x.done); if(!lastEx) startRest(d.rest, d.name); } },
@@ -544,7 +671,7 @@ const A = {
   async saveSettings(){ const code=$('#scode')&&$('#scode').value.trim(); if(code){ const c=parseCode(code); if(!c) return flash($('#scode')); $('#surl').value=c.url; $('#stok').value=c.token; }
     S.settings.url=$('#surl').value.trim(); S.settings.token=$('#stok').value.trim(); save(); const msg=$('#setmsg'); msg.textContent='Sprawdzam połączenie…';
     try{ const r=await fetch(S.settings.url+'?action=ping&token='+encodeURIComponent(S.settings.token)); const j=await r.json();
-      msg.textContent=j.ok?('Połączono z arkuszem „'+j.name+'”.'):('Arkusz odpowiedział: '+(j.error||'błąd')); if(j.ok){ S.syncErr=null; sync(true); } }
+      msg.textContent=j.ok?('Połączono z arkuszem „'+j.name+'”.'):('Arkusz odpowiedział: '+(j.error||'błąd')); if(j.ok){ S.syncErr=null; sync(true); fetchDiet(true); } }
     catch(e){ msg.textContent='Nie udało się połączyć. Sprawdź adres i czy wdrożenie ma dostęp „Każdy”.'; } paintSync(); },
   syncNow(){ S.syncErr=null; sync(true).then(()=>{ if(S.view==='settings') render(); }); },
   async pull(){ const msg=$('#setmsg'); msg.textContent='Pobieram…';
@@ -552,11 +679,25 @@ const A = {
       const ids=new Set(S.workouts.map(w=>w.id)); j.workouts.forEach(w=>{ if(!ids.has(w.id)) S.workouts.push(w); });
       const wd=new Set(S.weights.map(w=>w.date)); j.weights.forEach(w=>{ if(!wd.has(w.date)) S.weights.push(w); });
       const md=new Set(S.measures.map(m=>m.date)); j.measures.forEach(m=>{ if(!md.has(m.date)) S.measures.push(m); });
-      save(); render(); $('#setmsg').textContent='Pobrano: '+j.workouts.length+' treningów, '+j.weights.length+' wag, '+j.measures.length+' pomiarów.'; }
+      fetchDiet(true); save(); render(); $('#setmsg').textContent='Pobrano: '+j.workouts.length+' treningów, '+j.weights.length+' wag, '+j.measures.length+' pomiarów.'; }
     catch(e){ msg.textContent='Nie udało się pobrać danych z arkusza.'; } },
   async copyBackup(){ const txt=JSON.stringify({workouts:S.workouts,weights:S.weights,measures:S.measures}); const ta=$('#restore');
     try{ await navigator.clipboard.writeText(txt); $('#setmsg').textContent='Skopiowano kopię zapasową do schowka.'; }
     catch(e){ ta.value=txt; ta.focus(); ta.select(); $('#setmsg').textContent='Zaznaczyłem kopię w polu poniżej. Skopiuj ją ręcznie.'; } },
+  dday(b){ const v=+b.dataset.v; S.dietDate = v===0 ? today() : addDays(S.dietDate||today(), v); draft=null; save(); render(); },
+  eat(b){ const d=S.dietDate||today(); const m=S.diet.catering[d][+b.dataset.i]; const now=!isEaten(d,m); S.diet.eat[d+'|'+m.meal]=now; enqueue('eat',{date:d,meal:m.meal,eaten:now},'eat:'+d+'|'+m.meal); render(); },
+  foodForm(){ draft={name:''}; render(); const el=$('#fname'); if(el) el.focus(); },
+  foodCancel(){ draft=null; render(); },
+  foodSave(){ const name=$('#fname').value.trim(); const kcal=num($('#fkcal').value); if(!name) return flash($('#fname')); if(kcal==null) return flash($('#fkcal'));
+    addFoodEntry({name, kcal, p:num($('#fp').value)||0, c:num($('#fc').value)||0, f:num($('#ff').value)||0, amount:num($('#famt').value)||'', ean:draft&&draft.ean||'', source:(draft&&draft.source)||'Ręcznie'});
+    if(draft&&draft.ean&&draft.per100){ const pr=S.diet.products[draft.ean]; if(pr){ pr.name=name; pr.amount=num($('#famt').value)||pr.amount; } }
+    draft=null; render(); },
+  fav(b){ const f=S.diet.favs[+b.dataset.i]; if(!f) return; addFoodEntry({name:f.name,kcal:f.kcal,p:f.p,c:f.c,f:f.f,amount:f.amount,ean:f.ean,source:f.source||'Ręcznie'}); render(); },
+  delFood(b){ const id=b.dataset.v; S.diet.foods=S.diet.foods.filter(f=>f.id!==id); enqueue('delFood',{id},'fd:'+id); render(); },
+  scanOpen(){ openScanner(); },
+  scanClose(){ closeScanner(); },
+  eanGo(){ const c=$('#eanin').value; closeScanner(); lookupEan(c); },
+  dietRefresh(b,e){ e&&e.preventDefault(); fetchDiet(true); },
   restore(){ try{ const j=JSON.parse($('#restore').value); ['workouts','weights','measures'].forEach(k=>{ if(Array.isArray(j[k])) S[k]=j[k]; }); S.demo=false; save(); render(); }
     catch(e){ flash($('#restore')); } },
   clearDemo(){ const st=S.settings; S=fresh(); S.settings=st; S.demoCleared=true; save(); render(); }
@@ -570,7 +711,7 @@ document.addEventListener('click',e=>{
   a(b,e);
 });
 document.addEventListener('input',e=>{
-  const t=e.target; if(t.dataset.in && S.active){ const s=S.active.ex[+t.dataset.i].sets[+t.dataset.j]; if(t.dataset.in==='kg') s.kg=t.value.replace(',','.'); else s.reps=num(t.value)||''; save(); }
+  const t=e.target; if(t.dataset.calc){ calcDraft(); return; } if(t.dataset.in && S.active){ const s=S.active.ex[+t.dataset.i].sets[+t.dataset.j]; if(t.dataset.in==='kg') s.kg=t.value.replace(',','.'); else s.reps=num(t.value)||''; save(); }
 });
 document.addEventListener('change',e=>{ if(e.target.dataset.sel==='prog'){ S.progEx=e.target.value; save(); render(); } });
 document.addEventListener('focusin',e=>{ if(e.target.matches('.sets input')) setTimeout(()=>e.target.select(),0); });
@@ -590,6 +731,15 @@ function seedDemo(){
   const m0=new Date(now); m0.setDate(m0.getDate()-28); const m1=new Date(now); m1.setDate(m1.getDate()-1);
   s.measures.push({date:ymd(m0),arm:41.0,forearm:33.0,chest:112,waist:84,thigh:62,calf:40,bf:13});
   s.measures.push({date:ymd(m1),arm:41.6,forearm:33.3,chest:113,waist:84.5,thigh:62.5,calf:40});
+  const t=ymd(now); s.diet.catering[t]=[
+    {date:t,meal:'ŚNIADANIE',name:'Bułeczka proteinowa z pieczonym kurczakiem, twarożkiem z czerwonym pesto',kcal:658,p:67.5,c:14.1,f:35.4,diet:'Dieta Active Pro, 3000 kcal'},
+    {date:t,meal:'II ŚNIADANIE',name:'Malinowy shake proteinowy',kcal:289,p:24.3,c:31.2,f:6.9,diet:'Dieta Active Pro, 3000 kcal'},
+    {date:t,meal:'OBIAD',name:'Kotlet pożarski w sosie pieczarkowym, kasza gryczana, surówka',kcal:1011,p:72.8,c:98.5,f:35.9,diet:'Dieta Active Pro, 3000 kcal'},
+    {date:t,meal:'PODWIECZOREK',name:'Brzoskwiniowy sernik na zimno',kcal:457,p:32.3,c:41.6,f:18.9,diet:'Dieta Active Pro, 3000 kcal'},
+    {date:t,meal:'KOLACJA',name:'Sałatka grecka z pieczonym łososiem',kcal:515,p:30.3,c:19.9,f:35.2,diet:'Dieta Active Pro, 3000 kcal'}];
+  s.diet.eat[t+'|PODWIECZOREK']=false;
+  s.diet.foods.push({id:'demof1',date:t,time:now.getTime()-3600000,source:'Skaner',name:'Coca-Cola 500 ml',amount:500,kcal:210,p:0,c:53,f:0});
+  s.diet.favs=[{name:'Coca-Cola 500 ml',kcal:210,p:0,c:53,f:0,amount:500},{name:'Banan',kcal:105,p:1.3,c:27,f:0.4}];
   return s;
 }
 
@@ -599,7 +749,7 @@ S = load();
 if(!S){ S = IS_REAL ? fresh() : seedDemo(); save(); }
 if(S.active && S.view!=='workout' && S.view!=='settings') S.view='workout';
 try{ const m=location.hash.match(/^#zd=(.+)$/); if(m){ const c=parseCode(m[1]); if(c){ S.settings.url=c.url; S.settings.token=c.token; save(); } history.replaceState(null,'',location.pathname); } }catch(e){}
-render(); sync();
+render(); sync(); fetchDiet();
 if('serviceWorker' in navigator && IS_REAL){ try{ navigator.serviceWorker.register('sw.js',{updateViaCache:'none'}).then(r=>r.update()).catch(()=>{}); }catch(e){} }
 </script>
 
