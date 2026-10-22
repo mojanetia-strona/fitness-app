@@ -401,6 +401,7 @@ V.train = () => {
     h+=`<div class="summary"><h3>${esc(DAY[s.dayId].name)} zapisany</h3><div class="row note" style="color:#fff"><span class="num" style="font-weight:600">${s.min} min</span>·<span class="num" style="font-weight:600">${s.sets} serii</span>·<span class="num" style="font-weight:600">${fN(s.vol/1000,2)} t</span></div>
       ${s.prs.length?'<div class="mt">'+s.prs.map(p=>`<div class="row" style="justify-content:space-between"><span>Rekord: ${esc(p.name)}</span><b class="delta" style="color:#00B8C7">+${fN(p.d)} kg e1RM</b></div>`).join('')+'</div>':''}
       <button class="btn ghost mt" data-a="dismissSummary">OK</button></div>`; }
+  if(!S.settings.url && !S.demo) h+=`<div class="demo"><span><b>Apka nie jest połączona z arkuszem.</b> Treningi zapisują się tylko na telefonie.</span><button data-a="nav" data-v="settings">Połącz</button></div>`;
   h+=`<h2>Ten tydzień</h2>${stripWeek()}<h3>Wybierz trening</h3><div class="days">`;
   PLAN.forEach(d=>{ const ld=lastDone(d.id); const isN=d.id===nx && !doneW.has(d.id);
     const pill = doneW.has(d.id)?'<span class="pill done">Zrobione</span>':isN?'<span class="pill next">Następny</span>':d.optional?'<span class="pill opt">Opcjonalny</span>':'';
@@ -492,7 +493,9 @@ V.progress = () => {
 V.settings = () => {
   const st=S.settings;
   return `<h2>Ustawienia</h2><p class="lede">Połączenie z Twoim arkuszem Google. Dane zawsze są najpierw na telefonie.</p>
-  <div class="panel"><div class="field"><label class="label" for="surl">Adres aplikacji Apps Script</label><input id="surl" value="${esc(st.url)}" placeholder="https://script.google.com/macros/s/…/exec" autocapitalize="off" autocorrect="off"></div>
+  <div class="panel"><div class="field"><label class="label" for="scode">Kod połączenia</label><input id="scode" placeholder="Wklej kod ZD:… od Claude" autocapitalize="off" autocorrect="off"></div>
+  <p class="note">Kod uzupełni adres i token. Możesz też wpisać je ręcznie.</p>
+  <div class="field mt"><label class="label" for="surl">Adres aplikacji Apps Script</label><input id="surl" value="${esc(st.url)}" placeholder="https://script.google.com/macros/s/…/exec" autocapitalize="off" autocorrect="off"></div>
   <div class="field mt"><label class="label" for="stok">Token</label><input id="stok" value="${esc(st.token)}" autocapitalize="off" autocorrect="off"></div>
   <div class="row mt"><button class="btn primary" data-a="saveSettings">Zapisz i sprawdź</button><button class="btn" data-a="syncNow">Wyślij teraz</button></div>
   <p class="note" id="setmsg">${S.queue.length} w kolejce · ostatnia synchronizacja: ${S.lastSync?new Date(S.lastSync).toLocaleString('pl-PL'):'jeszcze nie'}${S.syncErr?' · '+esc(S.syncErr):''}</p></div>
@@ -538,7 +541,8 @@ const A = {
     if(!any) return flash($('#m-arm')); const old=S.measures.find(x=>x.date===date); const merged=Object.assign({},old||{},m);
     S.measures=S.measures.filter(x=>x.date!==date); S.measures.push(merged); enqueue('measure',merged,'ms:'+date); render(); },
   delMeasure(b){ const d=b.dataset.v; S.measures=S.measures.filter(x=>x.date!==d); enqueue('delMeasure',{date:d},'ms:'+d); render(); },
-  async saveSettings(){ S.settings.url=$('#surl').value.trim(); S.settings.token=$('#stok').value.trim(); save(); const msg=$('#setmsg'); msg.textContent='Sprawdzam połączenie…';
+  async saveSettings(){ const code=$('#scode')&&$('#scode').value.trim(); if(code){ const c=parseCode(code); if(!c) return flash($('#scode')); $('#surl').value=c.url; $('#stok').value=c.token; }
+    S.settings.url=$('#surl').value.trim(); S.settings.token=$('#stok').value.trim(); save(); const msg=$('#setmsg'); msg.textContent='Sprawdzam połączenie…';
     try{ const r=await fetch(S.settings.url+'?action=ping&token='+encodeURIComponent(S.settings.token)); const j=await r.json();
       msg.textContent=j.ok?('Połączono z arkuszem „'+j.name+'”.'):('Arkusz odpowiedział: '+(j.error||'błąd')); if(j.ok){ S.syncErr=null; sync(true); } }
     catch(e){ msg.textContent='Nie udało się połączyć. Sprawdź adres i czy wdrożenie ma dostęp „Każdy”.'; } paintSync(); },
@@ -557,6 +561,7 @@ const A = {
     catch(e){ flash($('#restore')); } },
   clearDemo(){ const st=S.settings; S=fresh(); S.settings=st; S.demoCleared=true; save(); render(); }
 };
+function parseCode(code){ try{ const j=JSON.parse(decodeURIComponent(escape(atob(code.replace(/^ZD:/,'').trim())))); return (j.url&&j.token)?j:null; }catch(e){ return null; } }
 function flash(el){ if(!el) return; el.style.borderColor='var(--bad)'; el.focus(); setTimeout(()=>el.style.borderColor='',1500); }
 document.addEventListener('click',e=>{
   const b=e.target.closest('[data-a]'); if(!b) return; const a=A[b.dataset.a]; if(!a) return;
@@ -593,6 +598,7 @@ const IS_REAL = /github\.io$|localhost$|127\.0\.0\.1$/.test(location.hostname);
 S = load();
 if(!S){ S = IS_REAL ? fresh() : seedDemo(); save(); }
 if(S.active && S.view!=='workout' && S.view!=='settings') S.view='workout';
+try{ const m=location.hash.match(/^#zd=(.+)$/); if(m){ const c=parseCode(m[1]); if(c){ S.settings.url=c.url; S.settings.token=c.token; save(); } history.replaceState(null,'',location.pathname); } }catch(e){}
 render(); sync();
 if('serviceWorker' in navigator && IS_REAL){ try{ navigator.serviceWorker.register('sw.js'); }catch(e){} }
 </script>
