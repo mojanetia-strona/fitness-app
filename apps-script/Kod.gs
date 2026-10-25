@@ -79,6 +79,7 @@ function onOpen() {
   SpreadsheetApp.getUi().createMenu('Fitness')
     .addItem('Zbuduj / odśwież arkusz', 'setup')
     .addItem('Pokaż token', 'showToken')
+    .addItem('Ustaw klucz API Claude (AI w diecie)', 'setClaudeKey')
     .addItem('Włącz niedzielny raport mailem', 'installReportTrigger')
     .addItem('Wyślij raport teraz (test)', 'sendWeeklyReport')
     .addToUi();
@@ -339,11 +340,15 @@ function doGet(e) {
 }
 
 function doPost(e) {
+  let body;
+  try { body = JSON.parse(e.postData.contents); } catch (err) { return json_({ ok: false, error: 'Złe dane' }); }
+  if (body.token !== getToken_()) return json_({ ok: false, error: 'Zły token' });
+  if (body.action === 'estimate') {
+    try { return json_(estimate_(body.text)); } catch (err) { return json_({ ok: false, error: err.message }); }
+  }
   const lock = LockService.getScriptLock();
   lock.waitLock(25000);
   try {
-    const body = JSON.parse(e.postData.contents);
-    if (body.token !== getToken_()) return json_({ ok: false, error: 'Zły token' });
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const done = [], errors = [];
     (body.items || []).forEach(it => {
@@ -357,6 +362,70 @@ function doPost(e) {
   } finally {
     lock.releaseLock();
   }
+}
+
+/* ================= AI: posiłek opisany słownie ================= */
+// Klucz API trzymany we właściwościach skryptu (ANTHROPIC_API_KEY), nigdy w apce.
+// Model można zmienić właściwością CLAUDE_MODEL.
+function setClaudeKey() {
+  const ui = SpreadsheetApp.getUi();
+  const r = ui.prompt('Klucz API Claude', 'Wklej klucz z console.anthropic.com (zaczyna się od sk-ant-):', ui.ButtonSet.OK_CANCEL);
+  if (r.getSelectedButton() !== ui.Button.OK) return;
+  const k = r.getResponseText().trim();
+  if (!/^sk-ant-/.test(k)) { ui.alert('To nie wygląda na klucz API Claude (powinien zaczynać się od sk-ant-).'); return; }
+  PropertiesService.getScriptProperties().setProperty('ANTHROPIC_API_KEY', k);
+  const t = estimate_('banan 120 g');
+  ui.alert(t.ok ? 'Zapisano klucz. Test działa: banan 120 g ≈ ' + t.items[0].kcal + ' kcal.\n\nTeraz: Wdróż > Zarządzaj wdrożeniami > ołówek > Wersja: Nowa wersja > Wdróż.'
+    : 'Zapisano klucz, ale test nie przeszedł: ' + t.error);
+}
+
+function estimate_(text) {
+  text = String(text || '').trim().slice(0, 600);
+  if (!text) return { ok: false, error: 'Pusty opis posiłku' };
+  const props = PropertiesService.getScriptProperties();
+  const key = props.getProperty('ANTHROPIC_API_KEY');
+  if (!key) return { ok: false, error: 'Brak klucza API Claude. W arkuszu: menu Fitness > Ustaw klucz API Claude.' };
+  const model = props.getProperty('CLAUDE_MODEL') || 'claude-sonnet-5-5';
+  const tool = {
+    name: 'zapisz_posilek',
+    description: 'Zapisuje oszacowane wartości odżywcze posiłku, osobno dla każdego składnika.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        items: { type: 'array', items: { type: 'object', properties: {
+          name: { type: 'string', description: 'Krótka polska nazwa pozycji, np. "Burger wołowy"' },
+          grams: { type: 'number', description: 'Gramatura całej porcji w gramach' },
+          kcal: { type: 'number', description: 'Kalorie całej porcji' },
+          protein: { type: 'number', description: 'Białko w gramach dla całej porcji' },
+          carbs: { type: 'number', description: 'Węglowodany w gramach dla całej porcji' },
+          fat: { type: 'number', description: 'Tłuszcz w gramach dla całej porcji' }
+        }, required: ['name', 'grams', 'kcal', 'protein', 'carbs', 'fat'] } },
+        note: { type: 'string', description: 'Jedno krótkie zdanie po polsku o przyjętych założeniach' }
+      },
+      required: ['items']
+    }
+  };
+  const system = 'Jesteś dietetykiem. Szacujesz kalorie i makroskładniki posiłków opisanych słownie po polsku. ' +
+    'Rozbij posiłek na sensowne pozycje (np. burger i frytki osobno; napój osobno). ' +
+    'Gdy podano gramaturę, użyj jej dokładnie dla tej pozycji. Gdy jej brak, przyjmij typową polską porcję ' +
+    '(np. frytki z fast foodu: mała ok. 80 g, średnia ok. 115 g, duża ok. 150 g). ' +
+    'Dania z restauracji i fast foodu szacuj realistycznie, z tłuszczem ze smażenia i sosami. ' +
+    'Wartości podawaj dla całej porcji, nie na 100 g.';
+  const res = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
+    method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+    headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+    payload: JSON.stringify({ model: model, max_tokens: 1024, system: system, tools: [tool],
+      tool_choice: { type: 'tool', name: 'zapisz_posilek' }, messages: [{ role: 'user', content: text }] })
+  });
+  const code = res.getResponseCode();
+  let j = {}; try { j = JSON.parse(res.getContentText()); } catch (err) {}
+  if (code !== 200) return { ok: false, error: 'Claude API: ' + ((j.error && j.error.message) || ('błąd ' + code)) };
+  const tu = (j.content || []).filter(c => c.type === 'tool_use')[0];
+  if (!tu || !tu.input || !tu.input.items || !tu.input.items.length) return { ok: false, error: 'Claude nie zwrócił wyniku. Opisz posiłek dokładniej.' };
+  const r1 = v => Math.round((Number(v) || 0) * 10) / 10;
+  const items = tu.input.items.map(x => ({ name: String(x.name || '').slice(0, 80), g: Math.round(Number(x.grams) || 0),
+    kcal: Math.round(Number(x.kcal) || 0), p: r1(x.protein), c: r1(x.carbs), f: r1(x.fat) })).filter(x => x.name);
+  return { ok: true, items: items, note: String(tu.input.note || '').slice(0, 200) };
 }
 
 function handle_(ss, it) {
