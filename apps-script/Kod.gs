@@ -598,7 +598,7 @@ function sleepHours_(p) {
   let out;
   if (h || m) out = (h ? numIn_(h[1]) : 0) + (m ? numIn_(m[1]) / 60 : 0);
   else { out = numIn_(v); if (out !== null && out > 1440) out = out / 3600; else if (out !== null && out > 24) out = out / 60; }
-  return out === null || out < 0 || out > 16 ? null : Math.round(out * 10) / 10;
+  return out === null || out <= 0 || out > 16 ? null : Math.round(out * 10) / 10; // 0 h = brak danych w Zdrowiu, nie nadpisuje ręcznego wpisu
 }
 
 function numIn_(v) { if (v === undefined || v === null || v === '') return null; const n = parseFloat(String(v).replace(/\s/g, '').replace(',', '.')); return isNaN(n) ? null : n; }
