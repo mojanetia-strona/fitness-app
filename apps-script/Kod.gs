@@ -379,6 +379,13 @@ function setClaudeKey() {
     : 'Zapisano klucz, ale test nie przeszedł: ' + t.error);
 }
 
+// Test z edytora: wybierz testClaude i kliknij Uruchom, wynik w Dzienniku wykonania.
+function testClaude() {
+  const t = estimate_('burger wołowy 400 g plus mała porcja frytek');
+  Logger.log(JSON.stringify(t));
+  return t;
+}
+
 function estimate_(text) {
   text = String(text || '').trim().slice(0, 600);
   if (!text) return { ok: false, error: 'Pusty opis posiłku' };
@@ -410,17 +417,22 @@ function estimate_(text) {
     'Gdy podano gramaturę, użyj jej dokładnie dla tej pozycji. Gdy jej brak, przyjmij typową polską porcję ' +
     '(np. frytki z fast foodu: mała ok. 80 g, średnia ok. 115 g, duża ok. 150 g). ' +
     'Dania z restauracji i fast foodu szacuj realistycznie, z tłuszczem ze smażenia i sosami. ' +
-    'Wartości podawaj dla całej porcji, nie na 100 g.';
+    'Wartości podawaj dla całej porcji, nie na 100 g. Zawsze odpowiadaj wyłącznie wywołaniem narzędzia zapisz_posilek.';
   const res = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
     method: 'post', contentType: 'application/json', muteHttpExceptions: true,
     headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' },
     payload: JSON.stringify({ model: model, max_tokens: 1024, system: system, tools: [tool],
-      tool_choice: { type: 'tool', name: 'zapisz_posilek' }, messages: [{ role: 'user', content: text }] })
+      tool_choice: { type: 'auto' }, messages: [{ role: 'user', content: text }] })
   });
   const code = res.getResponseCode();
   let j = {}; try { j = JSON.parse(res.getContentText()); } catch (err) {}
   if (code !== 200) return { ok: false, error: 'Claude API: ' + ((j.error && j.error.message) || ('błąd ' + code)) };
-  const tu = (j.content || []).filter(c => c.type === 'tool_use')[0];
+  let tu = (j.content || []).filter(c => c.type === 'tool_use')[0];
+  if (!tu) { // zapas: model odpisał tekstem z JSON-em
+    const txt = (j.content || []).filter(c => c.type === 'text').map(c => c.text).join('\n');
+    const m = txt.match(/\{[\s\S]*\}/);
+    try { if (m) tu = { input: JSON.parse(m[0]) }; } catch (err) {}
+  }
   if (!tu || !tu.input || !tu.input.items || !tu.input.items.length) return { ok: false, error: 'Claude nie zwrócił wyniku. Opisz posiłek dokładniej.' };
   const r1 = v => Math.round((Number(v) || 0) * 10) / 10;
   const items = tu.input.items.map(x => ({ name: String(x.name || '').slice(0, 80), g: Math.round(Number(x.grams) || 0),
