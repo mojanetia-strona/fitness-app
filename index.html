@@ -301,7 +301,7 @@ const esc = s => String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&g
 
 /* ============ state ============ */
 const KEY='zd_state_v1';
-const fresh = () => ({v:1, view:'train', workouts:[], weights:[], measures:[], active:null, queue:[], settings:{url:'',token:'',kcal:3300,protein:170,ntfy:''}, lastSync:null, syncErr:null, summary:null, demo:false, progEx:'bench', diet:{catering:{}, foods:[], fetched:null, eat:{}, favs:[], products:{}, daily:{}}, sleep:{}, dietDate:null});
+const fresh = () => ({v:1, view:'train', workouts:[], weights:[], measures:[], active:null, queue:[], settings:{url:'',token:'',kcal:3300,protein:170}, lastSync:null, syncErr:null, summary:null, demo:false, progEx:'bench', diet:{catering:{}, foods:[], fetched:null, eat:{}, favs:[], products:{}, daily:{}}, sleep:{}, dietDate:null});
 let S;
 function load(){ try{ const r=localStorage.getItem(KEY); if(!r) return null; const o=Object.assign(fresh(),JSON.parse(r)); o.diet=Object.assign(fresh().diet,o.diet||{}); return o; }catch(e){ return null; } }
 function save(){ try{ localStorage.setItem(KEY,JSON.stringify(S)); }catch(e){} }
@@ -416,14 +416,8 @@ function tickRest(){
 }
 let wl=null;
 async function wake(on){ try{ if(on && navigator.wakeLock){ wl=await navigator.wakeLock.request('screen'); } else if(!on && wl){ await wl.release(); wl=null; } }catch(e){} }
-document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible'){ if(S.active) wake(true); sync(); } else restPush(); });
-window.addEventListener('pagehide',()=>restPush());
-// Powiadomienie o końcu przerwy przy zgaszonym ekranie: ntfy.sh dostarcza je z opóźnieniem, aplikacja ntfy na iPhonie je pokazuje.
-function restPush(){ const topic=S.settings.ntfy; if(!topic||!rest||rest.pushed||rest.fired) return; const left=Math.round((rest.end-Date.now())/1000); if(left<10) return;
-  rest.pushed=true; ntfySend('Czas na serię: '+rest.label, left); }
-function ntfySend(msg, delaySec){ const topic=S.settings.ntfy; if(!topic) return Promise.resolve(false);
-  const q='?title='+encodeURIComponent('Koniec przerwy')+'&priority=high&tags=muscle'+(delaySec?'&delay='+delaySec+'s':'');
-  return fetch('https://ntfy.sh/'+encodeURIComponent(topic)+q,{method:'POST',body:msg,keepalive:true}).then(r=>r.ok).catch(()=>false); }
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible'){ if(S.active) wake(true); sync(); } });
+
 
 /* ============ charts ============ */
 function lineChart(series, opt={}){
@@ -746,9 +740,6 @@ V.settings = () => {
   <div class="field mt"><label class="label" for="stok">Token</label><input id="stok" value="${esc(st.token)}" autocapitalize="off" autocorrect="off"></div>
   <div class="row mt"><button class="btn primary" data-a="saveSettings">Zapisz i sprawdź</button><button class="btn" data-a="syncNow">Wyślij teraz</button></div>
   <p class="note" id="setmsg">${S.queue.length} w kolejce · ostatnia synchronizacja: ${S.lastSync?new Date(S.lastSync).toLocaleString('pl-PL'):'jeszcze nie'}${S.syncErr?' · '+esc(S.syncErr):''}</p></div>
-  <h3>Powiadomienie o końcu przerwy</h3><div class="panel"><p class="note" style="margin-top:0">Gdy zablokujesz telefon w trakcie przerwy, przyjdzie powiadomienie, że czas na serię. Zainstaluj darmową aplikację ntfy z App Store, dodaj w niej temat z pola poniżej (serwer ntfy.sh) i zezwól na powiadomienia.</p>
-  <div class="field"><label class="label" for="sntfy">Temat ntfy</label><input id="sntfy" value="${esc(st.ntfy||'')}" placeholder="kliknij Wygeneruj" autocapitalize="off" autocorrect="off"></div>
-  <div class="row mt"><button class="btn" data-a="ntfyGen">Wygeneruj</button><button class="btn" data-a="ntfyCopy">Kopiuj</button><button class="btn primary" data-a="ntfyTest">Zapisz i testuj</button></div><p class="note" id="ntfymsg"></p></div>
   <h3>Cele diety</h3><div class="panel"><div class="grid2"><div class="field"><label class="label" for="gkcal">Kalorie dziennie</label><input id="gkcal" inputmode="numeric" value="${DGOAL.kcal}"></div>
   <div class="field"><label class="label" for="gprot">Białko (g)</label><input id="gprot" inputmode="numeric" value="${DGOAL.p}"></div></div>
   <button class="btn mt" data-a="saveGoals">Zapisz cele</button></div>
@@ -756,7 +747,7 @@ V.settings = () => {
   <p class="note">„Pobierz z arkusza” przywraca historię, np. na nowym telefonie. Kopia zapasowa kopiuje wszystkie dane jako tekst.</p>
   <div class="field mt"><label class="label" for="restore">Wklej kopię zapasową</label><textarea id="restore" placeholder='{"workouts":[…]}'></textarea></div>
   <button class="btn mt" data-a="restore" data-confirm="1">Wczytaj kopię</button></div>
-  <p class="note mt">Wersja 1.4 · plan: Push A, Pull A, Push B, Pull B, Nogi</p>`;
+  <p class="note mt">Wersja 1.5 · plan: Push A, Pull A, Push B, Pull B, Nogi</p>`;
 };
 
 /* ============ render ============ */
@@ -850,11 +841,6 @@ const A = {
   scanClose(){ closeScanner(); },
   eanGo(){ const c=$('#eanin').value; closeScanner(); lookupEan(c); },
   dietRefresh(b,e){ e&&e.preventDefault(); fetchDiet(true); },
-  ntfyGen(){ const a=new Uint8Array(9); crypto.getRandomValues(a); $('#sntfy').value='zd-'+Array.from(a,x=>x.toString(36).padStart(2,'0')).join('').slice(0,16); },
-  async ntfyCopy(){ const v=$('#sntfy').value.trim(); if(!v) return flash($('#sntfy')); try{ await navigator.clipboard.writeText(v); toast('Skopiowano temat'); }catch(e){ $('#sntfy').select(); } },
-  async ntfyTest(){ const v=$('#sntfy').value.trim(); if(v && !/^[A-Za-z0-9_-]{6,64}$/.test(v)) return flash($('#sntfy')); S.settings.ntfy=v; save();
-    if(!v){ $('#ntfymsg').textContent='Powiadomienia wyłączone.'; return; } $('#ntfymsg').textContent='Wysyłam test…';
-    const ok=await ntfySend('Test z Żelaznego Dziennika. Działa!'); $('#ntfymsg').textContent=ok?'Wysłane. Jeśli nie przyszło, sprawdź temat w aplikacji ntfy.':'Nie udało się wysłać. Sprawdź internet.'; },
   saveGoals(){ const k=num($('#gkcal').value), p=num($('#gprot').value); if(!k||k<1000||k>8000) return flash($('#gkcal')); if(!p||p<30||p>500) return flash($('#gprot')); S.settings.kcal=k; S.settings.protein=p; applyGoals(); save(); $('#setmsg').textContent='Zapisano cele: '+k+' kcal, '+p+' g białka.'; },
   restore(){ try{ const j=JSON.parse($('#restore').value); ['workouts','weights','measures'].forEach(k=>{ if(Array.isArray(j[k])) S[k]=j[k]; }); S.demo=false; save(); render(); }
     catch(e){ flash($('#restore')); } },

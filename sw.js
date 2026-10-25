@@ -1,5 +1,5 @@
 // Żelazny Dziennik: działanie offline. Zmień VERSION przy każdej aktualizacji apki.
-const VERSION = 'zd-1.4.0';
+const VERSION = 'zd-1.5.0';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icon-180.png', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
