@@ -605,6 +605,7 @@ function foodForm(){
   <div class="field"><label class="label" for="pc">Węgle</label><input id="pc" inputmode="decimal" value="${v('c',1)}" data-calc="1"></div>
   <div class="field"><label class="label" for="pf">Tłuszcz</label><input id="pf" inputmode="decimal" value="${v('f',1)}" data-calc="1"></div></div>
   <div class="field mt"><label class="label" for="famt">Ile zjadłeś (g lub ml)</label><input id="famt" inputmode="decimal" value="${draft.amount?fN(draft.amount,0):''}" data-calc="1" placeholder="np. 150"></div>
+  ${draft.pkg||draft.srv?`<div class="chips">${draft.pkg?`<button class="chip" data-a="setAmt" data-v="${draft.pkg}">Całe opakowanie · ${fN(draft.pkg,0)}</button>`:''}${draft.srv&&draft.srv!==draft.pkg?`<button class="chip" data-a="setAmt" data-v="${draft.srv}">Porcja · ${fN(draft.srv,0)}</button>`:''}</div>`:''}
   <div class="ftot" id="ftot">${draftTotLine()}</div>
   <div class="row mt"><button class="btn primary" style="flex:1" data-a="foodSave">${draft.editId?'Zapisz zmiany':'Dodaj'}</button><button class="btn ghost" data-a="foodCancel">Anuluj</button></div></div>`;
 }
@@ -706,9 +707,9 @@ async function lookupEan(code){
   let p=S.diet.products[code];
   if(!p){ try{ const r=await fetch('https://world.openfoodfacts.org/api/v2/product/'+code+'.json?fields=product_name,product_name_pl,brands,nutriments,serving_quantity,product_quantity');
       const j=await r.json(); if(j.status===1&&j.product){ const n=j.product.nutriments||{}; const kcal=n['energy-kcal_100g']!=null?n['energy-kcal_100g']:(n['energy_100g']!=null?n['energy_100g']/4.184:null);
-        if(kcal!=null){ p={name:[j.product.brands&&j.product.brands.split(',')[0],j.product.product_name_pl||j.product.product_name].filter(Boolean).join(' ').trim()||('Produkt '+code), per100:{kcal:+kcal,p:+(n.proteins_100g||0),c:+(n.carbohydrates_100g||0),f:+(n.fat_100g||0)}, amount:+(j.product.serving_quantity||j.product.product_quantity||100)}; S.diet.products[code]=p; save(); } } }
+        if(kcal!=null){ p={name:[j.product.brands&&j.product.brands.split(',')[0],j.product.product_name_pl||j.product.product_name].filter(Boolean).join(' ').trim()||('Produkt '+code), per100:{kcal:+kcal,p:+(n.proteins_100g||0),c:+(n.carbohydrates_100g||0),f:+(n.fat_100g||0)}, pkg:+j.product.product_quantity||null, srv:+j.product.serving_quantity||null}; p.amount=p.pkg||p.srv||100; S.diet.products[code]=p; save(); } } }
     catch(e){} }
-  if(p) draft={name:p.name, ean:code, per100:Object.assign({},p.per100), amount:p.amount, source:'Skaner'};
+  if(p) draft={name:p.name, ean:code, per100:Object.assign({},p.per100), amount:p.amount, pkg:p.pkg||null, srv:p.srv||null, source:'Skaner'};
   else draft={name:'', ean:code, source:'Skaner', notFound:true};
   aiDraft=null; render(); if(draft&&draft.notFound){ const el=$('#fname'); if(el){ el.placeholder='Nie znalazłem produktu, wpisz nazwę'; el.focus(); } }
   else if(draft){ const el=$('#famt'); if(el){ el.focus(); el.select(); } }
@@ -731,7 +732,7 @@ V.settings = () => {
   <p class="note">„Pobierz z arkusza” przywraca historię, np. na nowym telefonie. Kopia zapasowa kopiuje wszystkie dane jako tekst.</p>
   <div class="field mt"><label class="label" for="restore">Wklej kopię zapasową</label><textarea id="restore" placeholder='{"workouts":[…]}'></textarea></div>
   <button class="btn mt" data-a="restore" data-confirm="1">Wczytaj kopię</button></div>
-  <p class="note mt">Wersja 1.5 · plan: Push A, Pull A, Push B, Pull B, Nogi</p>`;
+  <p class="note mt">Wersja 1.6 · plan: Push A, Pull A, Push B, Pull B, Nogi</p>`;
 };
 
 /* ============ render ============ */
@@ -796,6 +797,7 @@ const A = {
   eat(b){ const d=S.dietDate||today(); const m=S.diet.catering[d][+b.dataset.i]; const now=!isEaten(d,m); S.diet.eat[d+'|'+m.meal]=now; enqueue('eat',{date:d,meal:m.meal,eaten:now},'eat:'+d+'|'+m.meal); render(); },
   foodForm(){ aiDraft=null; draft={name:'',source:'Ręcznie'}; render(); const el=$('#fname'); if(el) el.focus(); },
   foodCancel(){ draft=null; render(); },
+  setAmt(b){ const el=$('#famt'); if(!el) return; el.value=fN(+b.dataset.v,0); calcDraft(); },
   foodSave(){ calcDraft(); const name=$('#fname').value.trim(); const p=draft.per100; const amt=draft.amount;
     if(!name) return flash($('#fname')); if(p.kcal==null) return flash($('#pkcal')); if(!amt||amt<=0) return flash($('#famt'));
     const per100={kcal:p.kcal,p:p.p||0,c:p.c||0,f:p.f||0}; const t=draftTotals();
@@ -807,7 +809,8 @@ const A = {
     if(draft.ean){ const pr=S.diet.products[draft.ean]; S.diet.products[draft.ean]=Object.assign(pr||{own:true},{name, amount:amt, per100}); save(); }
     draft=null; render(); toast('Dodano: '+name+' · '+Math.round(t.kcal)+' kcal'); },
   fav(b){ const f=S.diet.favs[+b.dataset.i]; if(!f) return; const p=per100Of(f);
-    if(p){ openFoodForm({name:f.name, per100:p, amount:+f.amount||100, ean:f.ean||'', source:f.source||'Ręcznie'}, true); return; }
+    const pr=f.ean&&S.diet.products[f.ean];
+    if(p){ openFoodForm({name:f.name, per100:p, amount:+f.amount||100, ean:f.ean||'', pkg:pr&&pr.pkg||null, srv:pr&&pr.srv||null, source:f.source||'Ręcznie'}, true); return; }
     addFoodEntry({name:f.name,kcal:f.kcal,p:f.p,c:f.c,f:f.f,amount:f.amount,ean:f.ean,source:f.source||'Ręcznie'}); render(); toast('Dodano: '+f.name); },
   foodEdit(b){ const f=S.diet.foods.find(x=>x.id===b.dataset.v); if(!f) return; const p=per100Of(f);
     openFoodForm({editId:f.id, origName:f.name, name:f.name, per100:p||{kcal:f.kcal,p:f.p,c:f.c,f:f.f}, amount:p?+f.amount:100, ean:f.ean||'', source:f.source||'Ręcznie'}, true); },
