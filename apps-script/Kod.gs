@@ -452,7 +452,7 @@ function handle_(ss, it) {
     case 'catering':   saveCatering_(ss, d); break;
     case 'eat':        setEaten_(ss, d); break;
     case 'food':       saveFood_(ss, d); break;
-    case 'daily':      upsertDaily_(ss, d.date, d); break;
+    case 'daily':      upsertDaily_(ss, d.date, d, 'ręcznie'); break;
     case 'delFood':    deleteWhere_(ss.getSheetByName(SH.FOOD), 1, d.id); break;
     default: throw new Error('Nieznany typ ' + it.type);
   }
@@ -580,7 +580,7 @@ function json_(o) { return ContentService.createTextOutput(JSON.stringify(o)).se
 function dailyFromShortcut_(ss, p) {
   const date = /^\d{4}-\d{2}-\d{2}$/.test(p.date || '') ? p.date : Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
   const sleep = sleepHours_(p);
-  upsertDaily_(ss, date, { steps: p.steps, sleep: sleep });
+  upsertDaily_(ss, date, { steps: p.steps, sleep: sleep }, 'auto');
   const kg = numIn_(p.kg || p.weight);
   let wOk = false;
   if (kg !== null && kg >= 30 && kg <= 250) {
@@ -602,20 +602,24 @@ function sleepHours_(p) {
 }
 
 function numIn_(v) { if (v === undefined || v === null || v === '') return null; const n = parseFloat(String(v).replace(/\s/g, '').replace(',', '.')); return isNaN(n) ? null : n; }
-function upsertDaily_(ss, date, d) {
+// src: 'ręcznie' (apka) albo 'auto' (Skrót). Ręczny sen ma pierwszeństwo: Skrót go nie nadpisuje.
+function upsertDaily_(ss, date, d, src) {
   const sh = ss.getSheetByName(SH.DAILY); if (!sh || !date) return;
+  src = src || 'ręcznie';
+  if (sh.getRange(1, 4).getValue() === '') sh.getRange(1, 4).setValue('Źródło snu').setFontWeight('bold');
   const steps = numIn_(d.steps), sleep = numIn_(d.sleep);
   const n = sh.getLastRow() - 1;
   if (n > 0) {
-    const vals = sh.getRange(2, 1, n, 1).getValues();
+    const vals = sh.getRange(2, 1, n, 4).getValues();
     for (let i = 0; i < n; i++) if (key_(vals[i][0]) === date) {
       if (steps !== null) sh.getRange(i + 2, 2).setValue(Math.round(steps));
-      if (sleep !== null) sh.getRange(i + 2, 3).setValue(sleep);
+      const manualKept = src === 'auto' && vals[i][3] === 'ręcznie' && vals[i][2] !== '';
+      if (sleep !== null && !manualKept) sh.getRange(i + 2, 3, 1, 2).setValues([[sleep, src]]);
       return;
     }
   }
-  sh.appendRow([toDate_(date), steps === null ? '' : Math.round(steps), sleep === null ? '' : sleep]);
-  if (sh.getLastRow() > 2) sh.getRange(2, 1, sh.getLastRow() - 1, 3).sort({ column: 1, ascending: true });
+  sh.appendRow([toDate_(date), steps === null ? '' : Math.round(steps), sleep === null ? '' : sleep, sleep === null ? '' : src]);
+  if (sh.getLastRow() > 2) sh.getRange(2, 1, sh.getLastRow() - 1, 4).sort({ column: 1, ascending: true });
 }
 
 /* ================= RAPORT TYGODNIOWY ================= */
