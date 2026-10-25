@@ -201,6 +201,9 @@ h3{font-weight:700;font-size:18px;color:var(--navy);margin:26px 0 10px}
 .ai-it .m{grid-column:1;font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
 .ai-it input{grid-row:1/3;grid-column:2;height:42px;border:1px solid var(--line);text-align:center;font:600 16px var(--f-body);width:100%}
 .err{color:var(--bad);font-size:13px;margin:8px 0 0}
+.li .v.tap{border:0;background:none;text-align:left;padding:0;cursor:pointer}
+.meal .sw{flex:none;border:1.5px solid var(--line);background:var(--surface);border-radius:999px;padding:5px 10px;font-size:12px;font-weight:700;color:var(--navy);margin-top:2px}
+.swapnote{background:var(--warn-soft);color:var(--warn);font-size:13px;font-weight:600;padding:8px 10px;margin-bottom:10px}
 .scan p{color:#fff;margin:0;text-align:center}
 .scan .row{justify-content:center}
 .scan .btn{border-color:#fff;color:#fff}
@@ -298,7 +301,7 @@ const esc = s => String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&g
 
 /* ============ state ============ */
 const KEY='zd_state_v1';
-const fresh = () => ({v:1, view:'train', workouts:[], weights:[], measures:[], active:null, queue:[], settings:{url:'',token:'',kcal:3300,protein:170}, lastSync:null, syncErr:null, summary:null, demo:false, progEx:'bench', diet:{catering:{}, foods:[], fetched:null, eat:{}, favs:[], products:{}, daily:{}}, sleep:{}, dietDate:null});
+const fresh = () => ({v:1, view:'train', workouts:[], weights:[], measures:[], active:null, queue:[], settings:{url:'',token:'',kcal:3300,protein:170,ntfy:''}, lastSync:null, syncErr:null, summary:null, demo:false, progEx:'bench', diet:{catering:{}, foods:[], fetched:null, eat:{}, favs:[], products:{}, daily:{}}, sleep:{}, dietDate:null});
 let S;
 function load(){ try{ const r=localStorage.getItem(KEY); if(!r) return null; const o=Object.assign(fresh(),JSON.parse(r)); o.diet=Object.assign(fresh().diet,o.diet||{}); return o; }catch(e){ return null; } }
 function save(){ try{ localStorage.setItem(KEY,JSON.stringify(S)); }catch(e){} }
@@ -413,7 +416,14 @@ function tickRest(){
 }
 let wl=null;
 async function wake(on){ try{ if(on && navigator.wakeLock){ wl=await navigator.wakeLock.request('screen'); } else if(!on && wl){ await wl.release(); wl=null; } }catch(e){} }
-document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible'){ if(S.active) wake(true); sync(); } });
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible'){ if(S.active) wake(true); sync(); } else restPush(); });
+window.addEventListener('pagehide',()=>restPush());
+// Powiadomienie o końcu przerwy przy zgaszonym ekranie: ntfy.sh dostarcza je z opóźnieniem, aplikacja ntfy na iPhonie je pokazuje.
+function restPush(){ const topic=S.settings.ntfy; if(!topic||!rest||rest.pushed||rest.fired) return; const left=Math.round((rest.end-Date.now())/1000); if(left<10) return;
+  rest.pushed=true; ntfySend('Czas na serię: '+rest.label, left); }
+function ntfySend(msg, delaySec){ const topic=S.settings.ntfy; if(!topic) return Promise.resolve(false);
+  const q='?title='+encodeURIComponent('Koniec przerwy')+'&priority=high&tags=muscle'+(delaySec?'&delay='+delaySec+'s':'');
+  return fetch('https://ntfy.sh/'+encodeURIComponent(topic)+q,{method:'POST',body:msg,keepalive:true}).then(r=>r.ok).catch(()=>false); }
 
 /* ============ charts ============ */
 function lineChart(series, opt={}){
@@ -497,7 +507,7 @@ V.weight = () => {
   let h=`<h2>Waga</h2><p class="lede">Rano, na czczo, 3 do 4 razy w tygodniu. Liczy się średnia tygodniowa.</p>
   <div class="panel"><div class="grid2"><div class="field"><label class="label" for="wdate">Data</label><input type="date" id="wdate" value="${t}"></div><div></div></div>
     <div class="big-in mt"><button class="step" data-a="wstep" data-v="-0.1" aria-label="Minus 0,1">−</button><input id="wkg" inputmode="decimal" value="${last?fN(last.kg):''}" placeholder="85,0" aria-label="Waga w kg"><button class="step" data-a="wstep" data-v="0.1" aria-label="Plus 0,1">+</button></div>
-    <div class="row mt" style="flex-wrap:nowrap"><label class="label" for="wsleep" style="flex:none;width:72px">Sen (h)</label><button class="step" style="height:46px;width:46px;font-size:20px" data-a="sstep" data-v="-0.5" aria-label="Minus pół godziny">−</button><input id="wsleep" inputmode="decimal" value="${S.sleep[t]!=null?fN(S.sleep[t]):''}" placeholder="${fN(lastSleep()??8)}" style="flex:1;min-width:0;height:46px;border:1px solid var(--line);text-align:center;font:700 22px var(--f-body);color:var(--navy)"><button class="step" style="height:46px;width:46px;font-size:20px" data-a="sstep" data-v="0.5" aria-label="Plus pół godziny">+</button></div>
+    <div class="row mt" style="flex-wrap:nowrap"><label class="label" for="wsleep" style="flex:none;width:72px">Sen (h)</label><button class="step" style="height:46px;width:46px;font-size:20px" data-a="sstep" data-v="-0.5" aria-label="Minus pół godziny">−</button><input id="wsleep" inputmode="decimal" value="${sleepOf(t)!=null?fN(sleepOf(t)):''}" placeholder="${fN(lastSleep()??8)}" style="flex:1;min-width:0;height:46px;border:1px solid var(--line);text-align:center;font:700 22px var(--f-body);color:var(--navy)"><button class="step" style="height:46px;width:46px;font-size:20px" data-a="sstep" data-v="0.5" aria-label="Plus pół godziny">+</button></div>
     <button class="btn primary block mt" data-a="saveWeight">Zapisz</button></div>
   ${sleepStepsPanel()}
   <div class="strip mt"><div><div class="label">Śr. 7 dni</div><div class="v">${fN(a7)}<small>kg</small></div></div>
@@ -515,6 +525,7 @@ V.weight = () => {
   h+=`<h3>Wpisy</h3><div class="panel list">${ws.slice(-12).reverse().map(w=>`<div class="li"><span class="d">${fD(w.date)}</span><span class="v">${fN(w.kg)} kg</span><button class="x" data-a="delWeight" data-v="${w.date}" data-confirm="1">Usuń</button></div>`).join('')||'<div class="empty">Brak wpisów. Zapisz pierwszą wagę powyżej.</div>'}</div>`;
   return h;
 };
+function sleepOf(d){ return S.sleep[d]!=null?S.sleep[d]:(S.diet.daily[d]&&S.diet.daily[d].sleep!=null?S.diet.daily[d].sleep:null); }
 function lastSleep(){ const ks=Object.keys(S.sleep).sort(); return ks.length?S.sleep[ks[ks.length-1]]:null; }
 function sleepStepsPanel(){
   const t=today(); const days=[...Array(7)].map((_,i)=>addDays(t,-i));
@@ -569,7 +580,11 @@ async function fetchDiet(force){
       const have=new Set(S.diet.foods.map(f=>f.id)); const delPend=new Set(S.queue.filter(q=>q.type==='delFood').map(q=>q.data.id));
       j.foods.forEach(f=>{ if(!have.has(f.id) && !delPend.has(f.id)) S.diet.foods.push(f); });
       if(j.daily){ const dm={}; j.daily.forEach(x=>{ dm[x.date]=x; }); S.diet.daily=Object.assign(S.diet.daily||{}, dm); }
-      S.diet.fetched=Date.now(); save(); if(S.view==='diet') render(); }
+      if(j.weights){ const pendW=new Set(S.queue.filter(q=>q.type==='weight'||q.type==='delWeight').map(q=>q.data.date));
+        const byDate={}; S.weights.forEach(w=>{ byDate[w.date]=w; });
+        j.weights.forEach(w=>{ if(!pendW.has(w.date) && w.kg) byDate[w.date]={date:w.date,kg:w.kg}; });
+        S.weights=Object.values(byDate); }
+      S.diet.fetched=Date.now(); save(); if(S.view==='diet' || (S.view==='weight' && !document.activeElement.matches('input'))) render(); }
   }catch(e){}
   dietFetching=false;
 }
@@ -589,17 +604,17 @@ V.diet = () => {
     <div class="bar" style="margin-bottom:0"><i style="width:${pp.toFixed(0)}%;background:#A6CE3A"></i></div></div>`;
   h+=`<h3>Catering${cat[0]&&cat[0].diet?' · '+esc(String(cat[0].diet).replace(/^Dieta\s*/,'')):''}</h3>`;
   if(cat.length){ h+=`<div class="panel list" style="padding-block:0">${cat.map((m,i)=>{ const on=isEaten(d,m); return `<div class="meal${on?'':' off'}"><button class="chk${on?' on':''}" data-a="eat" data-i="${i}" aria-label="${on?'Zjedzone':'Nie zjedzone'}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></button>
-      <div class="t"><span class="k">${esc(MEALNAME[m.meal]||m.meal)}</span><span class="n">${esc(m.name)}</span><span class="m">${Math.round(m.kcal)} kcal · B ${fN(m.p,0)} · W ${fN(m.c,0)} · T ${fN(m.f,0)}</span></div></div>`; }).join('')}</div>
-      <p class="note">Odznacz posiłek, którego nie zjadłeś.</p>`; }
+      <div class="t"><span class="k">${esc(MEALNAME[m.meal]||m.meal)}</span><span class="n">${esc(m.name)}</span><span class="m">${Math.round(m.kcal)} kcal · B ${fN(m.p,0)} · W ${fN(m.c,0)} · T ${fN(m.f,0)}</span></div><button class="sw" data-a="swapMeal" data-i="${i}">Zamień</button></div>`; }).join('')}</div>
+      <p class="note">Odznacz posiłek, którego nie zjadłeś. „Zamień” odznacza go i od razu dodajesz, co zjadłeś zamiast.</p>`; }
   else h+=`<div class="empty">Brak menu cateringu na ten dzień. Menu zaczytuję w poniedziałki, a w razie potrzeby napisz do Claude „zaczytaj catering”.</div>`;
   h+=`<h3>Dodatkowe</h3>`;
-  if(foods.length) h+=`<div class="panel list">${foods.map(f=>`<div class="li"><span class="d">${f.time?new Date(f.time).toLocaleTimeString('pl-PL',{hour:'2-digit',minute:'2-digit'}):''}</span><span class="v" style="font-size:15px">${esc(f.name)}<span class="note" style="display:block;font-weight:400">${f.amount?fN(f.amount,0)+' g · ':''}${Math.round(f.kcal)} kcal · B ${fN(f.p,0)} g</span></span><button class="x" data-a="delFood" data-v="${f.id}" data-confirm="1">Usuń</button></div>`).join('')}</div>`;
+  if(foods.length) h+=`<div class="panel list">${foods.map(f=>`<div class="li"><span class="d">${f.time?new Date(f.time).toLocaleTimeString('pl-PL',{hour:'2-digit',minute:'2-digit'}):''}</span><button class="v tap" style="font-size:15px" data-a="foodEdit" data-v="${f.id}">${esc(f.name)}<span class="note" style="display:block;font-weight:400">${f.amount?fN(f.amount,0)+' g · ':''}${Math.round(f.kcal)} kcal · B ${fN(f.p,0)} g · zmień</span></button><button class="x" data-a="delFood" data-v="${f.id}" data-confirm="1">Usuń</button></div>`).join('')}</div>`;
   h+=`<div class="row mt"><button class="btn primary" style="flex:1" data-a="scanOpen">Skanuj kod</button><button class="btn" style="flex:1" data-a="foodForm">Dodaj ręcznie</button></div>
   <button class="btn block mt" data-a="aiOpen">Opisz posiłek słownie (AI)</button>`;
   if(draft) h+=foodForm();
   if(aiDraft) h+=aiPanel();
   const favs=S.diet.favs.slice(0,10);
-  if(favs.length && !draft && !aiDraft) h+=`<div class="chips">${favs.map((f,i)=>`<button class="chip" data-a="fav" data-i="${i}">+ ${esc(f.name)} · ${Math.round(f.kcal)}</button>`).join('')}</div><p class="note">Stuknij, żeby dodać ponownie.</p>`;
+  if(favs.length && !draft && !aiDraft) h+=`<div class="chips">${favs.map((f,i)=>`<button class="chip" data-a="fav" data-i="${i}">+ ${esc(f.name)} · ${Math.round(f.kcal)}</button>`).join('')}</div><p class="note">Stuknij, żeby dodać ponownie i ustawić gramaturę.</p>`;
   h+=`<p class="note mt">${S.diet.fetched?'Menu pobrane '+new Date(S.diet.fetched).toLocaleString('pl-PL',{day:'numeric',month:'numeric',hour:'2-digit',minute:'2-digit'}):'Menu jeszcze nie pobrane'} · <a href="#" data-a="dietRefresh" style="color:var(--accent)">odśwież</a></p>`;
   return h;
 };
@@ -613,8 +628,10 @@ function foodForm(){
   <div class="field"><label class="label" for="pf">Tłuszcz</label><input id="pf" inputmode="decimal" value="${v('f',1)}" data-calc="1"></div></div>
   <div class="field mt"><label class="label" for="famt">Ile zjadłeś (g lub ml)</label><input id="famt" inputmode="decimal" value="${draft.amount?fN(draft.amount,0):''}" data-calc="1" placeholder="np. 150"></div>
   <div class="ftot" id="ftot">${draftTotLine()}</div>
-  <div class="row mt"><button class="btn primary" style="flex:1" data-a="foodSave">Dodaj</button><button class="btn ghost" data-a="foodCancel">Anuluj</button></div></div>`;
+  <div class="row mt"><button class="btn primary" style="flex:1" data-a="foodSave">${draft.editId?'Zapisz zmiany':'Dodaj'}</button><button class="btn ghost" data-a="foodCancel">Anuluj</button></div></div>`;
 }
+function per100Of(f){ if(f.per100&&f.per100.kcal!=null) return Object.assign({},f.per100); const a=+f.amount||0; if(!a) return null; const k=x=>(+x||0)*100/a; return {kcal:k(f.kcal),p:k(f.p),c:k(f.c),f:k(f.f)}; }
+function openFoodForm(d, focusAmt){ aiDraft=null; draft=d; render(); const el=$(focusAmt?'#famt':'#fname'); if(el){ el.focus(); if(focusAmt) el.select(); } const p=$('#ffp'); if(p) p.scrollIntoView({block:'center'}); }
 function draftTotals(){ const p=draft&&draft.per100||{}; const a=+(draft&&draft.amount)||0; const x=k=>(+p[k]||0)*a/100; return {kcal:x('kcal'),p:x('p'),c:x('c'),f:x('f'),ok:a>0&&p.kcal!=null&&p.kcal!==''}; }
 function draftTotLine(){ const t=draftTotals(); return t.ok?`Razem ${Math.round(t.kcal)} kcal<small>B ${fN(t.p)} g · W ${fN(t.c)} g · T ${fN(t.f)} g</small>`:'<small>Wpisz kcal na 100 g i gramaturę, policzę resztę.</small>'; }
 function calcDraft(){ if(!draft) return; draft.per100={kcal:num($('#pkcal').value),p:num($('#pp').value),c:num($('#pc').value),f:num($('#pf').value)}; draft.amount=num($('#famt').value); const el=$('#ftot'); if(el) el.innerHTML=draftTotLine(); }
@@ -625,13 +642,14 @@ function aiLine(it){ return `${Math.round(it.kcal)} kcal · B ${fN(it.p,0)} · W
 function aiTotal(){ const t={kcal:0,p:0,c:0,f:0}; (aiDraft.items||[]).forEach(i=>{ t.kcal+=i.kcal; t.p+=i.p; t.c+=i.c; t.f+=i.f; }); return t; }
 function aiPanel(){
   const a=aiDraft;
-  if(!a.items) return `<div class="panel mt" id="aip"><label class="label" for="aitext">Co zjadłeś?</label>
+  const sw=a.swap?`<div class="swapnote">Zamiast z cateringu: ${esc(a.swap)} (odznaczony)</div>`:'';
+  if(!a.items) return `<div class="panel mt" id="aip">${sw}<label class="label" for="aitext">Co zjadłeś${a.swap?' zamiast':''}?</label>
     <textarea id="aitext" class="aitext mt" placeholder="np. burger wołowy 400 g plus mała porcja frytek">${esc(a.text||'')}</textarea>
     ${a.err?`<p class="err">${esc(a.err)}</p>`:''}
     <div class="row mt"><button class="btn primary" style="flex:1" data-a="aiGo"${a.loading?' disabled':''}>${a.loading?'Liczę…':'Policz'}</button><button class="btn ghost" data-a="aiCancel">Anuluj</button></div>
     <p class="note">Claude oszacuje kalorie i makro. Gramaturę każdej pozycji poprawisz przed dodaniem.</p></div>`;
   const t=aiTotal();
-  return `<div class="panel mt" id="aip"><p class="label" style="margin:0">„${esc(a.text)}”</p>
+  return `<div class="panel mt" id="aip">${sw}<p class="label" style="margin:0">„${esc(a.text)}”</p>
     <div class="list">${a.items.map((it,i)=>`<div class="ai-it"><span class="n">${esc(it.name)}</span><input inputmode="decimal" data-aig="${i}" value="${fN(it.g,0)}" aria-label="Gramy: ${esc(it.name)}"><span class="m" id="ail${i}">${aiLine(it)}</span></div>`).join('')}</div>
     <div class="ftot" id="aitot">Razem ${Math.round(t.kcal)} kcal<small>B ${fN(t.p)} g · W ${fN(t.c)} g · T ${fN(t.f)} g</small></div>
     ${a.note?`<p class="note">${esc(a.note)}</p>`:''}
@@ -728,6 +746,9 @@ V.settings = () => {
   <div class="field mt"><label class="label" for="stok">Token</label><input id="stok" value="${esc(st.token)}" autocapitalize="off" autocorrect="off"></div>
   <div class="row mt"><button class="btn primary" data-a="saveSettings">Zapisz i sprawdź</button><button class="btn" data-a="syncNow">Wyślij teraz</button></div>
   <p class="note" id="setmsg">${S.queue.length} w kolejce · ostatnia synchronizacja: ${S.lastSync?new Date(S.lastSync).toLocaleString('pl-PL'):'jeszcze nie'}${S.syncErr?' · '+esc(S.syncErr):''}</p></div>
+  <h3>Powiadomienie o końcu przerwy</h3><div class="panel"><p class="note" style="margin-top:0">Gdy zablokujesz telefon w trakcie przerwy, przyjdzie powiadomienie, że czas na serię. Zainstaluj darmową aplikację ntfy z App Store, dodaj w niej temat z pola poniżej (serwer ntfy.sh) i zezwól na powiadomienia.</p>
+  <div class="field"><label class="label" for="sntfy">Temat ntfy</label><input id="sntfy" value="${esc(st.ntfy||'')}" placeholder="kliknij Wygeneruj" autocapitalize="off" autocorrect="off"></div>
+  <div class="row mt"><button class="btn" data-a="ntfyGen">Wygeneruj</button><button class="btn" data-a="ntfyCopy">Kopiuj</button><button class="btn primary" data-a="ntfyTest">Zapisz i testuj</button></div><p class="note" id="ntfymsg"></p></div>
   <h3>Cele diety</h3><div class="panel"><div class="grid2"><div class="field"><label class="label" for="gkcal">Kalorie dziennie</label><input id="gkcal" inputmode="numeric" value="${DGOAL.kcal}"></div>
   <div class="field"><label class="label" for="gprot">Białko (g)</label><input id="gprot" inputmode="numeric" value="${DGOAL.p}"></div></div>
   <button class="btn mt" data-a="saveGoals">Zapisz cele</button></div>
@@ -735,7 +756,7 @@ V.settings = () => {
   <p class="note">„Pobierz z arkusza” przywraca historię, np. na nowym telefonie. Kopia zapasowa kopiuje wszystkie dane jako tekst.</p>
   <div class="field mt"><label class="label" for="restore">Wklej kopię zapasową</label><textarea id="restore" placeholder='{"workouts":[…]}'></textarea></div>
   <button class="btn mt" data-a="restore" data-confirm="1">Wczytaj kopię</button></div>
-  <p class="note mt">Wersja 1.3 · plan: Push A, Pull A, Push B, Pull B, Nogi</p>`;
+  <p class="note mt">Wersja 1.4 · plan: Push A, Pull A, Push B, Pull B, Nogi</p>`;
 };
 
 /* ============ render ============ */
@@ -752,7 +773,7 @@ window.addEventListener('online',()=>{ sync(); fetchDiet(true); });
 
 /* ============ actions ============ */
 const A = {
-  nav(b){ const v=b.dataset.v; if(v==='train' && S.active) S.view='workout'; else S.view=v; if(v==='diet'){ S.dietDate=today(); draft=null; aiDraft=null; fetchDiet(); } save(); render(); window.scrollTo(0,0); },
+  nav(b){ const v=b.dataset.v; if(v==='train' && S.active) S.view='workout'; else S.view=v; if(v==='diet'){ S.dietDate=today(); draft=null; aiDraft=null; fetchDiet(); } if(v==='weight') fetchDiet(); save(); render(); window.scrollTo(0,0); },
   start(b){ if(S.active && S.active.dayId!==b.dataset.v){ S.view='workout'; render(); return; } if(S.active){ S.view='workout'; render(); return; } startWorkout(b.dataset.v); window.scrollTo(0,0); },
   tick(b){ unlockAudio(); const i=+b.dataset.i, j=+b.dataset.j; const s=S.active.ex[i].sets[j]; s.done=!s.done; s.ts=Date.now(); save(); rerenderCard(i);
     if(s.done){ const d=EX[S.active.ex[i].exId]; const lastEx=i===S.active.ex.length-1 && S.active.ex[i].sets.every(x=>x.done); if(!lastEx) startRest(d.rest, d.name); } },
@@ -803,13 +824,24 @@ const A = {
   foodSave(){ calcDraft(); const name=$('#fname').value.trim(); const p=draft.per100; const amt=draft.amount;
     if(!name) return flash($('#fname')); if(p.kcal==null) return flash($('#pkcal')); if(!amt||amt<=0) return flash($('#famt'));
     const per100={kcal:p.kcal,p:p.p||0,c:p.c||0,f:p.f||0}; const t=draftTotals();
+    if(draft.editId){ const e=S.diet.foods.find(x=>x.id===draft.editId);
+      if(e){ Object.assign(e,{name, kcal:t.kcal, p:t.p, c:t.c, f:t.f, amount:amt, per100}); enqueue('food', e, 'fd:'+e.id);
+        S.diet.favs=S.diet.favs.map(x=>x.name===draft.origName?Object.assign({},x,{name, kcal:t.kcal, p:t.p, c:t.c, f:t.f, amount:amt, per100}):x); save(); }
+      draft=null; render(); toast('Zapisano zmiany: '+name); return; }
     addFoodEntry({name, kcal:t.kcal, p:t.p, c:t.c, f:t.f, amount:amt, per100, ean:draft.ean||'', source:draft.source||'Ręcznie'});
     if(draft.ean){ const pr=S.diet.products[draft.ean]; S.diet.products[draft.ean]=Object.assign(pr||{own:true},{name, amount:amt, per100}); save(); }
     draft=null; render(); toast('Dodano: '+name+' · '+Math.round(t.kcal)+' kcal'); },
-  fav(b){ const f=S.diet.favs[+b.dataset.i]; if(!f) return; addFoodEntry({name:f.name,kcal:f.kcal,p:f.p,c:f.c,f:f.f,amount:f.amount,ean:f.ean,source:f.source||'Ręcznie',per100:f.per100||undefined}); render(); toast('Dodano: '+f.name); },
+  fav(b){ const f=S.diet.favs[+b.dataset.i]; if(!f) return; const p=per100Of(f);
+    if(p){ openFoodForm({name:f.name, per100:p, amount:+f.amount||100, ean:f.ean||'', source:f.source||'Ręcznie'}, true); return; }
+    addFoodEntry({name:f.name,kcal:f.kcal,p:f.p,c:f.c,f:f.f,amount:f.amount,ean:f.ean,source:f.source||'Ręcznie'}); render(); toast('Dodano: '+f.name); },
+  foodEdit(b){ const f=S.diet.foods.find(x=>x.id===b.dataset.v); if(!f) return; const p=per100Of(f);
+    openFoodForm({editId:f.id, origName:f.name, name:f.name, per100:p||{kcal:f.kcal,p:f.p,c:f.c,f:f.f}, amount:p?+f.amount:100, ean:f.ean||'', source:f.source||'Ręcznie'}, true); },
+  swapMeal(b){ const d=S.dietDate||today(); const m=S.diet.catering[d][+b.dataset.i]; if(!m) return;
+    if(isEaten(d,m)){ S.diet.eat[d+'|'+m.meal]=false; enqueue('eat',{date:d,meal:m.meal,eaten:false},'eat:'+d+'|'+m.meal); }
+    draft=null; aiDraft={text:'', swap:(MEALNAME[m.meal]||m.meal)+', '+Math.round(m.kcal)+' kcal'}; render(); const el=$('#aitext'); if(el){ el.focus(); el.scrollIntoView({block:'center'}); } },
   aiOpen(){ draft=null; aiDraft={text:''}; render(); const el=$('#aitext'); if(el){ el.focus(); el.scrollIntoView({block:'center'}); } },
   aiGo(){ aiEstimate(); },
-  aiBack(){ aiDraft={text:aiDraft.text}; render(); const el=$('#aitext'); if(el) el.focus(); },
+  aiBack(){ aiDraft={text:aiDraft.text, swap:aiDraft.swap}; render(); const el=$('#aitext'); if(el) el.focus(); },
   aiCancel(){ aiDraft=null; render(); },
   aiAdd(){ const its=(aiDraft.items||[]).filter(i=>i.g>0); if(!its.length) return; its.forEach(i=>addFoodEntry({name:i.name, kcal:Math.round(i.kcal), p:Math.round(i.p*10)/10, c:Math.round(i.c*10)/10, f:Math.round(i.f*10)/10, amount:Math.round(i.g), per100:i.per100, source:'AI'}));
     const t=aiTotal(); aiDraft=null; render(); toast('Dodano '+its.length+(its.length===1?' pozycję':' pozycje')+' · '+Math.round(t.kcal)+' kcal'); },
@@ -818,6 +850,11 @@ const A = {
   scanClose(){ closeScanner(); },
   eanGo(){ const c=$('#eanin').value; closeScanner(); lookupEan(c); },
   dietRefresh(b,e){ e&&e.preventDefault(); fetchDiet(true); },
+  ntfyGen(){ const a=new Uint8Array(9); crypto.getRandomValues(a); $('#sntfy').value='zd-'+Array.from(a,x=>x.toString(36).padStart(2,'0')).join('').slice(0,16); },
+  async ntfyCopy(){ const v=$('#sntfy').value.trim(); if(!v) return flash($('#sntfy')); try{ await navigator.clipboard.writeText(v); toast('Skopiowano temat'); }catch(e){ $('#sntfy').select(); } },
+  async ntfyTest(){ const v=$('#sntfy').value.trim(); if(v && !/^[A-Za-z0-9_-]{6,64}$/.test(v)) return flash($('#sntfy')); S.settings.ntfy=v; save();
+    if(!v){ $('#ntfymsg').textContent='Powiadomienia wyłączone.'; return; } $('#ntfymsg').textContent='Wysyłam test…';
+    const ok=await ntfySend('Test z Żelaznego Dziennika. Działa!'); $('#ntfymsg').textContent=ok?'Wysłane. Jeśli nie przyszło, sprawdź temat w aplikacji ntfy.':'Nie udało się wysłać. Sprawdź internet.'; },
   saveGoals(){ const k=num($('#gkcal').value), p=num($('#gprot').value); if(!k||k<1000||k>8000) return flash($('#gkcal')); if(!p||p<30||p>500) return flash($('#gprot')); S.settings.kcal=k; S.settings.protein=p; applyGoals(); save(); $('#setmsg').textContent='Zapisano cele: '+k+' kcal, '+p+' g białka.'; },
   restore(){ try{ const j=JSON.parse($('#restore').value); ['workouts','weights','measures'].forEach(k=>{ if(Array.isArray(j[k])) S[k]=j[k]; }); S.demo=false; save(); render(); }
     catch(e){ flash($('#restore')); } },

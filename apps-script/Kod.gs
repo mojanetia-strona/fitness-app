@@ -334,7 +334,7 @@ function doGet(e) {
   if (p.token !== getToken_()) return json_({ ok: false, error: 'Zły token' });
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   if (p.action === 'pull') return json_(Object.assign({ ok: true }, pullAll_(ss), dietRange_(ss, '', '')));
-  if (p.action === 'daily') { upsertDaily_(ss, p.date || Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd'), { steps: p.steps, sleep: p.sleep }); return json_({ ok: true }); }
+  if (p.action === 'daily') return json_(dailyFromShortcut_(ss, p));
   if (p.action === 'diet') return json_(Object.assign({ ok: true }, dietRange_(ss, p.from || '', p.to || '')));
   return json_({ ok: true, name: ss.getName() });
 }
@@ -506,7 +506,10 @@ function dietRange_(ss, from, to) {
   const dl = ss.getSheetByName(SH.DAILY);
   const daily = dl && dl.getLastRow() > 1 ? dl.getRange(2, 1, dl.getLastRow() - 1, 3).getValues().filter(r => r[0] && inR(key_(r[0])))
     .map(r => ({ date: key_(r[0]), steps: r[1] === '' ? null : Number(r[1]), sleep: r[2] === '' ? null : Number(r[2]) })) : [];
-  return { catering: catering, foods: foods, daily: daily };
+  const wt = ss.getSheetByName(SH.WEIGHT);
+  const weights = wt && wt.getLastRow() > 1 ? wt.getRange(2, 1, wt.getLastRow() - 1, 2).getValues().filter(r => r[0] && r[1] !== '' && inR(key_(r[0])))
+    .map(r => ({ date: key_(r[0]), kg: Number(r[1]) })) : [];
+  return { catering: catering, foods: foods, daily: daily, weights: weights };
 }
 
 function colorDays_(tr) {
@@ -572,6 +575,32 @@ function json_(o) { return ContentService.createTextOutput(JSON.stringify(o)).se
 
 
 /* ================= KROKI I SEN ================= */
+// Skróty iOS: ?action=daily&token=…&steps=…&sleep=…&kg=…  (każdy parametr opcjonalny)
+// sleep: godziny (7,5), „7 h 30 min”, albo sleep_min (minuty) / sleep_s (sekundy)
+function dailyFromShortcut_(ss, p) {
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(p.date || '') ? p.date : Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
+  const sleep = sleepHours_(p);
+  upsertDaily_(ss, date, { steps: p.steps, sleep: sleep });
+  const kg = numIn_(p.kg || p.weight);
+  let wOk = false;
+  if (kg !== null && kg >= 30 && kg <= 250) {
+    const sh = ss.getSheetByName(SH.WEIGHT);
+    upsertByDate_(sh, date, [Math.round(kg * 10) / 10]); rewriteWeightFormulas_(sh); wOk = true;
+  }
+  return { ok: true, date: date, steps: numIn_(p.steps), sleep: sleep, kg: wOk ? Math.round(kg * 10) / 10 : null };
+}
+function sleepHours_(p) {
+  if (numIn_(p.sleep_s) !== null) return Math.round(numIn_(p.sleep_s) / 360) / 10;
+  if (numIn_(p.sleep_min) !== null) return Math.round(numIn_(p.sleep_min) / 6) / 10;
+  const v = String(p.sleep == null ? '' : p.sleep).toLowerCase();
+  if (!v) return null;
+  const h = v.match(/([\d.,]+)\s*(h|godz)/), m = v.match(/([\d.,]+)\s*(min|m\b)/);
+  let out;
+  if (h || m) out = (h ? numIn_(h[1]) : 0) + (m ? numIn_(m[1]) / 60 : 0);
+  else { out = numIn_(v); if (out !== null && out > 1440) out = out / 3600; else if (out !== null && out > 24) out = out / 60; }
+  return out === null || out < 0 || out > 16 ? null : Math.round(out * 10) / 10;
+}
+
 function numIn_(v) { if (v === undefined || v === null || v === '') return null; const n = parseFloat(String(v).replace(/\s/g, '').replace(',', '.')); return isNaN(n) ? null : n; }
 function upsertDaily_(ss, date, d) {
   const sh = ss.getSheetByName(SH.DAILY); if (!sh || !date) return;
