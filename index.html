@@ -203,6 +203,9 @@ h3{font-weight:700;font-size:18px;color:var(--navy);margin:26px 0 10px}
 .err{color:var(--bad);font-size:13px;margin:8px 0 0}
 .li .v.tap{border:0;background:none;text-align:left;padding:0;cursor:pointer}
 .meal .sw{flex:none;border:1.5px solid var(--line);background:var(--surface);border-radius:999px;padding:5px 10px;font-size:12px;font-weight:700;color:var(--navy);margin-top:2px}
+.stars{display:flex;gap:6px}
+.stars .star{flex:1;height:50px;border:1.5px solid var(--line);background:var(--surface);font-size:26px;line-height:1;color:var(--line);border-radius:0}
+.stars .star.on{color:#E8A317;border-color:#E8A317;background:#FFF8E6}
 .seg{display:grid;grid-template-columns:1fr 1fr;border:1.5px solid var(--navy);border-radius:999px;overflow:hidden;margin:4px 0 14px}
 .seg button{border:0;background:none;height:40px;font-weight:700;color:var(--navy)}
 .seg button[aria-pressed="true"]{background:var(--navy);color:#fff}
@@ -322,7 +325,7 @@ const esc = s => String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&g
 
 /* ============ state ============ */
 const KEY='zd_state_v1';
-const fresh = () => ({v:1, view:'train', workouts:[], weights:[], measures:[], active:null, queue:[], settings:{url:'',token:'',kcal:3300,protein:170}, lastSync:null, syncErr:null, summary:null, demo:false, progEx:'bench', diet:{catering:{}, foods:[], fetched:null, eat:{}, favs:[], products:{}, daily:{}}, sleep:{}, dietDate:null});
+const fresh = () => ({v:1, view:'train', workouts:[], weights:[], measures:[], active:null, queue:[], settings:{url:'',token:'',kcal:3300,protein:170}, lastSync:null, syncErr:null, summary:null, demo:false, progEx:'bench', diet:{catering:{}, foods:[], fetched:null, eat:{}, favs:[], products:{}, daily:{}}, sleep:{}, sleepQ:{}, dietDate:null});
 let S;
 function load(){ try{ const r=localStorage.getItem(KEY); if(!r) return null; const o=Object.assign(fresh(),JSON.parse(r)); o.diet=Object.assign(fresh().diet,o.diet||{}); return o; }catch(e){ return null; } }
 function save(){ try{ localStorage.setItem(KEY,JSON.stringify(S)); }catch(e){} }
@@ -520,12 +523,11 @@ V.weight = () => {
   let st='<span class="pill opt">Za mało danych</span>';
   if(rate!=null){ st = rate<GOAL.rateLo? '<span class="pill warn">Za wolno</span>' : rate<=GOAL.rateHi? '<span class="pill done">W celu</span>' : rate<=0.5? '<span class="pill warn">Szybko</span>' : '<span class="pill bad">Za szybko</span>'; }
   const cur=a7??(last&&last.kg); const prog=cur?Math.max(0,Math.min(1,(cur-GOAL.start)/(GOAL.target-GOAL.start))):0;
-  let h=`<h2>Waga</h2><p class="lede">Rano, na czczo, 3 do 4 razy w tygodniu. Liczy się średnia tygodniowa.</p>
+  let h=`<h2>Waga i sen</h2><p class="lede">Rano, na czczo, 3 do 4 razy w tygodniu. Liczy się średnia tygodniowa.</p>
   <div class="panel"><div class="grid2"><div class="field"><label class="label" for="wdate">Data</label><input type="date" id="wdate" value="${t}"></div><div></div></div>
     <div class="big-in mt"><button class="step" data-a="wstep" data-v="-0.1" aria-label="Minus 0,1">−</button><input id="wkg" inputmode="decimal" value="${last?fN(last.kg):''}" placeholder="85,0" aria-label="Waga w kg"><button class="step" data-a="wstep" data-v="0.1" aria-label="Plus 0,1">+</button></div>
-    <div class="row mt" style="flex-wrap:nowrap"><label class="label" for="wsleep" style="flex:none;width:72px">Sen (h)</label><button class="step" style="height:46px;width:46px;font-size:20px" data-a="sstep" data-v="-0.5" aria-label="Minus pół godziny">−</button><input id="wsleep" inputmode="decimal" value="${sleepOf(t)!=null?fN(sleepOf(t)):''}" placeholder="${fN(lastSleep()??8)}" style="flex:1;min-width:0;height:46px;border:1px solid var(--line);text-align:center;font:700 22px var(--f-body);color:var(--navy)"><button class="step" style="height:46px;width:46px;font-size:20px" data-a="sstep" data-v="0.5" aria-label="Plus pół godziny">+</button></div>
-    <button class="btn primary block mt" data-a="saveWeight">Zapisz</button></div>
-  ${sleepStepsPanel()}
+    <button class="btn primary block mt" data-a="saveWeight">Zapisz wagę</button></div>
+  ${sleepPanel()}
   <div class="strip mt"><div><div class="label">Śr. 7 dni</div><div class="v">${fN(a7)}<small>kg</small></div></div>
     <div><div class="label">Tempo / tydz.</div><div class="v">${rate==null?'–':(rate>0?'+':'')+fN(rate,2)}<small>kg</small></div></div>
     <div><div class="label">Status</div><div style="margin-top:6px">${st}</div></div></div>
@@ -596,12 +598,24 @@ async function labScan(){
   labBusy=false; if(S.view==='measure') render();
 }
 function lastSleep(){ const ks=Object.keys(S.sleep).sort(); return ks.length?S.sleep[ks[ks.length-1]]:null; }
-function sleepStepsPanel(){
-  const t=today(); const days=[...Array(7)].map((_,i)=>addDays(t,-i));
-  const sl=days.map(d=>S.sleep[d]!=null?S.sleep[d]:(S.diet.daily[d]&&S.diet.daily[d].sleep)).filter(x=>x!=null&&x!=='');
-  const st=days.map(d=>S.diet.daily[d]&&S.diet.daily[d].steps).filter(x=>x!=null&&x!=='');
-  const a=x=>x.length?x.reduce((p,q)=>p+ +q,0)/x.length:null; const as=a(sl), at=a(st);
-  return `<div class="strip mt" style="grid-template-columns:1fr 1fr"><div><div class="label">Sen śr. 7 dni</div><div class="v">${as==null?'–':fN(as)}<small>h</small></div></div><div><div class="label">Kroki śr. 7 dni</div><div class="v">${at==null?'–':Math.round(at).toLocaleString('pl-PL')}</div></div></div>${st.length?'':'<p class="note">Kroki dochodzą ze Skrótów iOS raz dziennie wieczorem.</p>'}`;
+function qOf(d){ return S.sleepQ&&S.sleepQ[d]!=null?S.sleepQ[d]:(S.diet.daily[d]&&S.diet.daily[d].q!=null&&S.diet.daily[d].q!==''?S.diet.daily[d].q:null); }
+let sleepStar=null, sleepStarDate=null;
+function sleepPanel(){
+  const t=today(); const d=sleepStarDate||t; const cur=sleepOf(d); const q=sleepStar!=null?sleepStar:qOf(d);
+  const days=[...Array(7)].map((_,i)=>addDays(t,-i));
+  const a=x=>x.length?x.reduce((p,v)=>p+ +v,0)/x.length:null;
+  const as=a(days.map(sleepOf).filter(x=>x!=null&&x!=='')), aq=a(days.map(qOf).filter(x=>x!=null&&x!=='')), at=a(days.map(x=>S.diet.daily[x]&&S.diet.daily[x].steps).filter(x=>x!=null&&x!==''));
+  const stars=[1,2,3,4,5].map(n=>`<button class="star${q!=null&&n<=q?' on':''}" data-a="sstar" data-v="${n}" aria-label="${n} na 5">★</button>`).join('');
+  const recent=days.filter(x=>sleepOf(x)!=null||qOf(x)!=null).slice(0,7);
+  return `<h3>Sen</h3><div class="panel"><p class="note" style="margin-top:0">Rano wpisz, ile spałeś ostatniej nocy i jak się wyspałeś.</p>
+    <div class="grid2"><div class="field"><label class="label" for="sdate">Dzień (rano po nocy)</label><input type="date" id="sdate" value="${d}" data-sdate="1"></div><div></div></div>
+    <div class="row mt" style="flex-wrap:nowrap"><button class="step" data-a="sstep" data-v="-0.5" aria-label="Minus pół godziny">−</button><input id="wsleep" inputmode="decimal" value="${cur!=null?fN(cur):''}" placeholder="${fN(lastSleep()??8)}" aria-label="Sen w godzinach" style="flex:1;min-width:0;height:60px;border:1px solid var(--line);text-align:center;font:700 30px var(--f-body);color:var(--navy)"><button class="step" data-a="sstep" data-v="0.5" aria-label="Plus pół godziny">+</button></div>
+    <p class="label mt" style="margin-bottom:4px">Jak się wyspałeś?</p><div class="stars">${stars}</div>
+    <button class="btn primary block mt" data-a="saveSleep">Zapisz sen</button></div>
+  <div class="strip mt"><div><div class="label">Sen śr. 7 dni</div><div class="v">${as==null?'–':fN(as)}<small>h</small></div></div>
+    <div><div class="label">Ocena śr.</div><div class="v">${aq==null?'–':fN(aq)}<small>/ 5</small></div></div>
+    <div><div class="label">Kroki śr.</div><div class="v" style="font-size:22px">${at==null?'–':Math.round(at).toLocaleString('pl-PL')}</div></div></div>
+  ${recent.length?`<div class="panel list mt">${recent.map(x=>`<div class="li"><span class="d">${fD(x)}</span><span class="v">${sleepOf(x)!=null?fN(sleepOf(x))+' h':'–'}</span><span class="note" style="color:#E8A317;letter-spacing:1px">${qOf(x)!=null?'★'.repeat(qOf(x))+'<span style="color:var(--line)">'+'★'.repeat(5-qOf(x))+'</span>':''}</span></div>`).join('')}</div>`:''}`;
 }
 V.measure = () => S.measTab==='badania' ? labsView() : V.measureObw();
 V.measureObw = () => {
@@ -825,7 +839,7 @@ V.settings = () => {
   <p class="note">„Pobierz z arkusza” przywraca historię, np. na nowym telefonie. Kopia zapasowa kopiuje wszystkie dane jako tekst.</p>
   <div class="field mt"><label class="label" for="restore">Wklej kopię zapasową</label><textarea id="restore" placeholder='{"workouts":[…]}'></textarea></div>
   <button class="btn mt" data-a="restore" data-confirm="1">Wczytaj kopię</button></div>
-  <p class="note mt">Wersja 1.7 · plan: Push A, Pull A, Push B, Pull B, Nogi</p>`;
+  <p class="note mt">Wersja 1.8 · plan: Push A, Pull A, Push B, Pull B, Nogi</p>`;
 };
 
 /* ============ render ============ */
@@ -855,14 +869,17 @@ const A = {
   restAdd(b){ if(rest){ rest.end+=(+b.dataset.v)*1000; rest.total=Math.max(rest.total,(rest.end-Date.now())/1000); rest.fired=false; $('#rest').classList.remove('over'); tickRest(); } },
   restStop(){ stopRest(); },
   wstep(b){ const el=$('#wkg'); const v=(num(el.value)||85)+parseFloat(b.dataset.v); el.value=fN(Math.round(v*10)/10); },
-  saveWeight(){ const kg=num($('#wkg').value), date=$('#wdate').value||today(); const sl=num($('#wsleep').value);
-    if(sl!=null && (sl<0||sl>16)) return flash($('#wsleep'));
-    const noKg=$('#wkg').value.trim()==='';
-    if(noKg && sl==null) return flash($('#wkg'));
-    if(!noKg && (!kg||kg<30||kg>250)) return flash($('#wkg'));
-    if(sl!=null){ S.sleep[date]=sl; enqueue('daily',{date,sleep:sl},'sl:'+date); }
-    if(!noKg){ S.weights=S.weights.filter(w=>w.date!==date); S.weights.push({date,kg}); enqueue('weight',{date,kg},'wt:'+date); }
-    render(); toast(noKg?'Zapisano sen: '+fN(sl)+' h':(sl!=null?'Zapisano: '+fN(kg)+' kg i '+fN(sl)+' h snu':'Zapisano wagę: '+fN(kg)+' kg')); },
+  saveWeight(){ const kg=num($('#wkg').value), date=$('#wdate').value||today();
+    if(!kg||kg<30||kg>250) return flash($('#wkg'));
+    S.weights=S.weights.filter(w=>w.date!==date); S.weights.push({date,kg}); enqueue('weight',{date,kg},'wt:'+date);
+    render(); toast('Zapisano wagę: '+fN(kg)+' kg'); },
+  saveSleep(){ const date=$('#sdate').value||today(); const sl=num($('#wsleep').value); const q=sleepStar!=null?sleepStar:qOf(date);
+    if(sl==null && q==null) return flash($('#wsleep'));
+    if(sl!=null && (sl<=0||sl>16)) return flash($('#wsleep'));
+    if(sl!=null) S.sleep[date]=sl; S.sleepQ=S.sleepQ||{}; if(q!=null) S.sleepQ[date]=q;
+    enqueue('daily',{date, sleep:sl!=null?sl:sleepOf(date), q},'sl:'+date);
+    sleepStar=null; sleepStarDate=null; render(); toast('Zapisano sen'+(sl!=null?': '+fN(sl)+' h':'')+(q!=null?' · '+q+'/5':'')); },
+  sstar(b){ const v=+b.dataset.v; sleepStar=(sleepStar===v?null:v); sleepStarDate=$('#sdate').value||today(); const sl=$('#wsleep').value; render(); const el=$('#wsleep'); if(el) el.value=sl; },
   sstep(b){ const el=$('#wsleep'); const v=(num(el.value)??(lastSleep()??8))+parseFloat(b.dataset.v); el.value=fN(Math.max(0,Math.min(16,v))); },
   delWeight(b){ const d=b.dataset.v; S.weights=S.weights.filter(w=>w.date!==d); enqueue('delWeight',{date:d},'wt:'+d); render(); },
   saveMeasure(){ const date=$('#mdate').value||today(); const m={date}; let any=false;
@@ -945,7 +962,7 @@ document.addEventListener('click',e=>{
 document.addEventListener('input',e=>{
   const t=e.target; if(t.dataset.calc){ calcDraft(); return; } if(t.dataset.aig!=null){ aiRescale(+t.dataset.aig, t.value); return; } if(t.id==='aitext'&&aiDraft){ aiDraft.text=t.value; return; } if(t.id==='fname'&&draft){ draft.name=t.value; return; } if(t.dataset.in && S.active){ const s=S.active.ex[+t.dataset.i].sets[+t.dataset.j]; if(t.dataset.in==='kg') s.kg=t.value.replace(',','.'); else s.reps=num(t.value)||''; save(); }
 });
-document.addEventListener('change',e=>{ if(e.target.id==='scanfile'){ scanPhoto(e.target.files&&e.target.files[0]); return; } if(e.target.dataset.sel==='prog'){ S.progEx=e.target.value; save(); render(); } });
+document.addEventListener('change',e=>{ if(e.target.dataset.sdate){ sleepStarDate=e.target.value; sleepStar=null; render(); return; } if(e.target.id==='scanfile'){ scanPhoto(e.target.files&&e.target.files[0]); return; } if(e.target.dataset.sel==='prog'){ S.progEx=e.target.value; save(); render(); } });
 document.addEventListener('focusin',e=>{ if(e.target.matches('.sets input')) setTimeout(()=>e.target.select(),0); });
 
 /* ============ demo (tylko w podglądzie) ============ */

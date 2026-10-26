@@ -508,8 +508,8 @@ function dietRange_(ss, from, to) {
   const foods = fd && fd.getLastRow() > 1 ? fd.getRange(2, 1, fd.getLastRow() - 1, 11).getValues().filter(r => r[0] && inR(key_(r[1])))
     .map(r => ({ id: String(r[0]), date: key_(r[1]), time: r[2] instanceof Date ? r[2].getTime() : null, source: r[3], name: r[4], amount: r[5], kcal: Number(r[6]) || 0, p: Number(r[7]) || 0, c: Number(r[8]) || 0, f: Number(r[9]) || 0, ean: String(r[10] || '') })) : [];
   const dl = ss.getSheetByName(SH.DAILY);
-  const daily = dl && dl.getLastRow() > 1 ? dl.getRange(2, 1, dl.getLastRow() - 1, 3).getValues().filter(r => r[0] && inR(key_(r[0])))
-    .map(r => ({ date: key_(r[0]), steps: r[1] === '' ? null : Number(r[1]), sleep: r[2] === '' ? null : Number(r[2]) })) : [];
+  const daily = dl && dl.getLastRow() > 1 ? dl.getRange(2, 1, dl.getLastRow() - 1, 5).getValues().filter(r => r[0] && inR(key_(r[0])))
+    .map(r => ({ date: key_(r[0]), steps: r[1] === '' ? null : Number(r[1]), sleep: r[2] === '' ? null : Number(r[2]), q: r[4] === '' ? null : Number(r[4]) })) : [];
   const wt = ss.getSheetByName(SH.WEIGHT);
   const weights = wt && wt.getLastRow() > 1 ? wt.getRange(2, 1, wt.getLastRow() - 1, 2).getValues().filter(r => r[0] && r[1] !== '' && inR(key_(r[0])))
     .map(r => ({ date: key_(r[0]), kg: Number(r[1]) })) : [];
@@ -611,7 +611,9 @@ function upsertDaily_(ss, date, d, src) {
   const sh = ss.getSheetByName(SH.DAILY); if (!sh || !date) return;
   src = src || 'ręcznie';
   if (sh.getRange(1, 4).getValue() === '') sh.getRange(1, 4).setValue('Źródło snu').setFontWeight('bold');
+  if (sh.getRange(1, 5).getValue() === '') sh.getRange(1, 5).setValue('Ocena snu (1-5)').setFontWeight('bold');
   const steps = numIn_(d.steps), sleep = numIn_(d.sleep);
+  let q = numIn_(d.q); if (q !== null && (q < 1 || q > 5)) q = null;
   const n = sh.getLastRow() - 1;
   if (n > 0) {
     const vals = sh.getRange(2, 1, n, 4).getValues();
@@ -619,11 +621,12 @@ function upsertDaily_(ss, date, d, src) {
       if (steps !== null) sh.getRange(i + 2, 2).setValue(Math.round(steps));
       const manualKept = src === 'auto' && vals[i][3] === 'ręcznie' && vals[i][2] !== '';
       if (sleep !== null && !manualKept) sh.getRange(i + 2, 3, 1, 2).setValues([[sleep, src]]);
+      if (q !== null) sh.getRange(i + 2, 5).setValue(q);
       return;
     }
   }
-  sh.appendRow([toDate_(date), steps === null ? '' : Math.round(steps), sleep === null ? '' : sleep, sleep === null ? '' : src]);
-  if (sh.getLastRow() > 2) sh.getRange(2, 1, sh.getLastRow() - 1, 4).sort({ column: 1, ascending: true });
+  sh.appendRow([toDate_(date), steps === null ? '' : Math.round(steps), sleep === null ? '' : sleep, sleep === null ? '' : src, q === null ? '' : q]);
+  if (sh.getLastRow() > 2) sh.getRange(2, 1, sh.getLastRow() - 1, 5).sort({ column: 1, ascending: true });
 }
 
 /* ================= RAPORT TYGODNIOWY ================= */
@@ -664,7 +667,8 @@ function weekStats_(ss) {
   const D = rows_(ss, SH.DIET, 3).filter(r => r[0] && inW(key_(r[0])) && key_(r[0]) <= todayK && Number(r[1]) > 0);
   const kcal = avg_(D.map(r => Number(r[1]))), prot = avg_(D.map(r => Number(r[2])));
   // kroki i sen
-  const DL = rows_(ss, SH.DAILY, 3).filter(r => r[0] && inW(key_(r[0])));
+  const DL = rows_(ss, SH.DAILY, 5).filter(r => r[0] && inW(key_(r[0])));
+  const sleepQ = avg_(DL.map(r => r[4] === '' ? NaN : Number(r[4])));
   const steps = avg_(DL.map(r => r[1] === '' ? NaN : Number(r[1]))), sleep = avg_(DL.map(r => r[2] === '' ? NaN : Number(r[2])));
   // pomiary
   const M = rows_(ss, SH.MEAS, 8).filter(r => r[0]);
@@ -673,7 +677,7 @@ function weekStats_(ss) {
   if (REP && REP.getLastRow() > 1) REP.getRange(2, 1, REP.getLastRow() - 1, 5).getValues().forEach((r, i) => { if (r[0] && key_(r[0]) === from) { coach = { text: String(r[2] || ''), tips: String(r[3] || '') }; coachRow = i + 2; } });
   return { from: from, to: to, mon: mon, sun: sun, wNow: wNow, wPrev: wPrev, wLast: wLast, wDays: W.filter(x => inW(x.k)).length,
     trainings: TR.map(r => ({ day: r[2], date: key_(r[1]), sets: r[6], vol: r[7], min: r[5] })), sets: seW.length, vol: seW.reduce((a, r) => a + (Number(r[8]) || 0), 0),
-    muscles: muscles, prs: prs, kcal: kcal, prot: prot, dietDays: D.length, steps: steps, sleep: sleep, dailyDays: DL.length,
+    muscles: muscles, prs: prs, kcal: kcal, prot: prot, dietDays: D.length, steps: steps, sleep: sleep, sleepQ: sleepQ, dailyDays: DL.length,
     lastMeas: M.length ? M[M.length - 1] : null, firstMeas: M.length ? M[0] : null, coach: coach, coachRow: coachRow };
 }
 
@@ -718,7 +722,7 @@ function reportHtml_(st, sheetUrl) {
     + tile('Treningi', st.trainings.length + ' / 5', st.sets + ' serii · ' + f1_(st.vol / 1000) + ' t') + '</tr><tr>'
     + tile('Kalorie śr.', st.kcal === null ? '–' : Math.round(st.kcal), 'cel 3300 · ' + st.dietDays + ' dni')
     + tile('Białko śr.', st.prot === null ? '–' : Math.round(st.prot) + ' g', 'cel 170 g', st.prot !== null && st.prot < 170 ? PINK : NAVY)
-    + tile('Kroki · sen', st.steps === null ? '–' : Math.round(st.steps).toLocaleString('pl-PL'), 'sen śr. ' + (st.sleep === null ? '–' : f1_(st.sleep) + ' h')) + '</tr></table>';
+    + tile('Kroki · sen', st.steps === null ? '–' : Math.round(st.steps).toLocaleString('pl-PL'), 'sen śr. ' + (st.sleep === null ? '–' : f1_(st.sleep) + ' h') + (st.sleepQ === null ? '' : ' · ocena ' + f1_(st.sleepQ) + '/5')) + '</tr></table>';
   // komentarz trenera
   if (st.coach && st.coach.text) {
     h += h3('Komentarz trenera') + '<div style="background:#fff;border:1px solid ' + LINE + ';border-left:4px solid ' + BLUE + ';padding:14px 16px">'
