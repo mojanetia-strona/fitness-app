@@ -9,7 +9,7 @@
  */
 
 const TZ = 'Europe/Warsaw';
-const SH = { DASH:'Dashboard', TRAIN:'Treningi', SETS:'Serie', WEIGHT:'Waga', MEAS:'Pomiary', REC:'Rekordy', WEEK:'Tygodnie', PLAN:'Plan', CAT:'Catering', FOOD:'Jedzenie', DIET:'Dieta', DAILY:'Codziennie', REP:'Raporty' };
+const SH = { DASH:'Dashboard', TRAIN:'Treningi', SETS:'Serie', WEIGHT:'Waga', MEAS:'Pomiary', REC:'Rekordy', WEEK:'Tygodnie', PLAN:'Plan', CAT:'Catering', FOOD:'Jedzenie', DIET:'Dieta', DAILY:'Codziennie', REP:'Raporty', LAB:'Badania', LABN:'Badania AI' };
 const REPORT_TO = 'glowadzkilukasz@gmail.com';
 const APP_URL = 'https://mojanetia-strona.github.io/fitness-app/';
 const MUSCLE = { bench:'Klatka', incdb:'Klatka', flatdb:'Klatka', cablefly:'Klatka', ohp:'Barki', latraise:'Barki', facepull:'Barki', cgskull:'Triceps', ohext:'Triceps', pushdown:'Triceps', dips:'Triceps', deadlift:'Plecy', wpullup:'Plecy', bbrow:'Plecy', latpull:'Plecy', csrow:'Plecy', bbcurl:'Biceps', hammer:'Biceps', inclcurl:'Biceps', cablecurl:'Biceps', squat:'Nogi', legpress:'Nogi', legcurl:'Nogi', calf:'Nogi' };
@@ -80,6 +80,7 @@ function onOpen() {
     .addItem('Zbuduj / odśwież arkusz', 'setup')
     .addItem('Pokaż token', 'showToken')
     .addItem('Ustaw klucz API Claude (AI w diecie)', 'setClaudeKey')
+    .addItem('Połącz folder z badaniami', 'connectLabFolder')
     .addItem('Włącz niedzielny raport mailem', 'installReportTrigger')
     .addItem('Wyślij raport teraz (test)', 'sendWeeklyReport')
     .addToUi();
@@ -343,6 +344,9 @@ function doPost(e) {
   let body;
   try { body = JSON.parse(e.postData.contents); } catch (err) { return json_({ ok: false, error: 'Złe dane' }); }
   if (body.token !== getToken_()) return json_({ ok: false, error: 'Zły token' });
+  if (body.action === 'labsScan') {
+    try { return json_(processLabFolder()); } catch (err) { return json_({ ok: false, error: err.message }); }
+  }
   if (body.action === 'estimate') {
     try { return json_(estimate_(body.text)); } catch (err) { return json_({ ok: false, error: err.message }); }
   }
@@ -509,7 +513,7 @@ function dietRange_(ss, from, to) {
   const wt = ss.getSheetByName(SH.WEIGHT);
   const weights = wt && wt.getLastRow() > 1 ? wt.getRange(2, 1, wt.getLastRow() - 1, 2).getValues().filter(r => r[0] && r[1] !== '' && inR(key_(r[0])))
     .map(r => ({ date: key_(r[0]), kg: Number(r[1]) })) : [];
-  return { catering: catering, foods: foods, daily: daily, weights: weights };
+  return Object.assign({ catering: catering, foods: foods, daily: daily, weights: weights }, labsData_(ss));
 }
 
 function colorDays_(tr) {
@@ -676,6 +680,7 @@ function weekStats_(ss) {
 function sendWeeklyReport() {
   const ss = SpreadsheetApp.getActiveSpreadsheet() || SpreadsheetApp.openById(PropertiesService.getScriptProperties().getProperty('SSID'));
   const st = weekStats_(ss);
+  st.labsDue = labsDue_(ss);
   const html = reportHtml_(st, ss.getUrl());
   const fmt = d => Utilities.formatDate(d, TZ, 'd.MM');
   MailApp.sendEmail({ to: REPORT_TO, subject: 'Żelazny Dziennik · tydzień ' + fmt(st.mon) + ' do ' + fmt(st.sun), htmlBody: html, name: 'Żelazny Dziennik' });
@@ -699,6 +704,13 @@ function reportHtml_(st, sheetUrl) {
   let h = '<div style="background:' + BG + ';padding:16px 0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto;background:' + BG + '"><tr><td style="padding:0 10px">';
   h += '<div style="background:' + NAVY + ';padding:18px 18px 16px;border-bottom:4px solid ' + PINK + '"><div style="' + font + 'color:#B9C7D0;font-size:12px;letter-spacing:.08em;text-transform:uppercase;font-weight:700">Raport tygodnia</div>'
     + '<div style="' + font + 'color:#fff;font-size:24px;font-weight:800;margin-top:2px">Żelazny Dziennik</div><div style="' + font + 'color:#B9C7D0;font-size:14px">' + fmt(st.mon) + ' do ' + fmt(st.sun) + '</div></div>';
+  // przypomnienie o badaniach
+  if (st.labsDue && st.labsDue.length) {
+    const over = st.labsDue.some(x => x.over);
+    h += '<div style="background:' + (over ? '#FDE7EF' : '#FFF3DF') + ';border-left:4px solid ' + (over ? PINK : '#B26B00') + ';padding:12px 14px;margin-top:10px;' + font + 'font-size:14px;color:' + NAVY + '">'
+      + '<b>Czas na badania krwi.</b> ' + st.labsDue.map(x => esc_(x.n) + ' (' + (x.over ? 'po terminie od ' : 'termin ') + Utilities.formatDate(toDate_(x.due), TZ, 'd.MM') + ')').join(', ')
+      + '. Wyniki wrzuć do folderu „Żelazny Dziennik - Badania” i kliknij w apce „Pobierz badania”.</div>';
+  }
   // kafle
   h += '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px"><tr>'
     + tile('Waga śr.', f1_(st.wNow) + ' kg', st.wDays + ' wpisów' + (st.wLast ? ', ostatni ' + f1_(st.wLast) : ''))
@@ -737,4 +749,135 @@ function reportHtml_(st, sheetUrl) {
     + '<div style="' + font + 'text-align:center;font-size:12px;color:' + MUTED + '"><a href="' + sheetUrl + '" style="color:' + BLUE + '">Arkusz z danymi</a> · raport wysyła się w każdą niedzielę</div>';
   h += '</td></tr></table></div>';
   return h;
+}
+
+/* ================= BADANIA (wyniki z folderu na Dysku) ================= */
+// Wyniki (PDF lub zdjęcie) wrzucasz do folderu, a apka przyciskiem „Pobierz badania” każe je odczytać.
+const LAB_FOLDER_ID = '1dOgnkqM5IOa_v8cAQup33SJmkBnL5RYB';
+const LAB_PANEL = [
+  { g: 'morfologia', n: 'Morfologia', m: 6 }, { g: 'lipidogram', n: 'Lipidogram', m: 6 }, { g: 'glukoza', n: 'Glukoza', m: 6 },
+  { g: 'watroba', n: 'Wątroba', m: 6 }, { g: 'nerki', n: 'Nerki', m: 6 }, { g: 'tarczyca', n: 'TSH', m: 6 },
+  { g: 'witamina_d', n: 'Witamina D', m: 6 }, { g: 'zelazo', n: 'Ferrytyna', m: 6 }, { g: 'mocz', n: 'Badanie moczu', m: 6 },
+  { g: 'hormony', n: 'Testosteron i wolny testosteron', m: 6 },
+  { g: 'hba1c', n: 'HbA1c', m: 12 }, { g: 'crp', n: 'CRP', m: 12 }
+];
+const LAB_GROUPS = LAB_PANEL.map(x => x.g).concat(['inne']);
+
+function connectLabFolder() {
+  const f = DriveApp.getFolderById(LAB_FOLDER_ID);
+  labSheets_(SpreadsheetApp.getActiveSpreadsheet());
+  try { SpreadsheetApp.getUi().alert('Folder połączony', 'Folder „' + f.getName() + '” jest gotowy. Wrzucaj tam wyniki, a w apce klikaj „Pobierz badania”.', SpreadsheetApp.getUi().ButtonSet.OK); } catch (e) {}
+}
+
+function labSheets_(ss) {
+  if (!ss.getSheetByName(SH.LAB)) dataSheet_(ss, SH.LAB, ['Data', 'Grupa', 'Kod', 'Parametr', 'Wynik', 'Jednostka', 'Norma od', 'Norma do', 'Poza normą', 'Plik', 'Dodano'],
+    [100, 100, 90, 240, 80, 90, 80, 80, 85, 220, 130], { A: 'd mmm yyyy', K: 'd mmm yyyy HH:mm' });
+  if (!ss.getSheetByName(SH.LABN)) dataSheet_(ss, SH.LABN, ['Data', 'Plik', 'Laboratorium', 'Komentarz', 'Dodano'], [100, 220, 160, 620, 130], { A: 'd mmm yyyy', E: 'd mmm yyyy HH:mm' });
+  ss.getSheetByName(SH.LABN).getRange('D2:D').setWrap(true).setVerticalAlignment('top');
+}
+
+function subfolder_(parent, name) { const it = parent.getFoldersByName(name); return it.hasNext() ? it.next() : parent.createFolder(name); }
+
+function processLabFolder() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) return { ok: false, error: 'Odczyt już trwa, spróbuj za chwilę.' };
+  const t0 = Date.now(), done = [], bad = [];
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet() || SpreadsheetApp.openById(PropertiesService.getScriptProperties().getProperty('SSID'));
+    labSheets_(ss);
+    const folder = DriveApp.getFolderById(LAB_FOLDER_ID);
+    const okF = subfolder_(folder, 'Przetworzone'), badF = subfolder_(folder, 'Nieodczytane');
+    const OK_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    const it = folder.getFiles();
+    while (it.hasNext()) {
+      if (Date.now() - t0 > 4.5 * 60000) break;
+      const f = it.next(), mime = f.getMimeType(), name = f.getName();
+      if (OK_TYPES.indexOf(mime) < 0) { f.moveTo(badF); bad.push(name + ': nieobsługiwany format (wrzuć PDF albo JPG)'); continue; }
+      if (mime !== 'application/pdf' && f.getSize() > 5 * 1024 * 1024) { f.moveTo(badF); bad.push(name + ': zdjęcie większe niż 5 MB'); continue; }
+      const r = labExtract_(ss, f.getBlob(), mime);
+      if (!r.ok) { bad.push(name + ': ' + r.error); if (r.final) f.moveTo(badF); continue; }
+      labSave_(ss, r, name);
+      f.moveTo(okF);
+      done.push({ file: name, date: r.date, n: r.results.length });
+    }
+    return { ok: true, done: done, bad: bad };
+  } finally { lock.releaseLock(); }
+}
+
+function labExtract_(ss, blob, mime) {
+  const props = PropertiesService.getScriptProperties();
+  const key = props.getProperty('ANTHROPIC_API_KEY');
+  if (!key) return { ok: false, error: 'brak klucza API Claude' };
+  const model = props.getProperty('CLAUDE_MODEL') || 'claude-sonnet-5-5';
+  // ostatnie wartości do porównania
+  const last = {};
+  rows_(ss, SH.LAB, 6).forEach(r => { if (r[0] && r[2]) last[r[2]] = key_(r[0]) + ': ' + r[4] + ' ' + r[5]; });
+  const prev = Object.keys(last).slice(0, 80).map(k => k + ' ' + last[k]).join('\n');
+  const tool = {
+    name: 'zapisz_wyniki', description: 'Zapisuje wszystkie wyniki z dokumentu badań laboratoryjnych.',
+    input_schema: { type: 'object', properties: {
+      date: { type: 'string', description: 'Data pobrania materiału, YYYY-MM-DD' },
+      lab: { type: 'string', description: 'Nazwa laboratorium, jeśli widoczna' },
+      results: { type: 'array', items: { type: 'object', properties: {
+        group: { type: 'string', enum: LAB_GROUPS },
+        code: { type: 'string', description: 'Krótki standardowy kod, np. WBC, HGB, PLT, CHOL, LDL, HDL, TG, GLU, ALT, AST, GGTP, KREA, EGFR, MOCZNIK, KWAS_MOCZ, TSH, FT4, WIT_D, FERR, FE, HBA1C, TESTO (całkowity), FTESTO (wolny), SHBG, CRP, CK; dla moczu prefiks MOCZ_, np. MOCZ_BIALKO' },
+        name: { type: 'string', description: 'Polska nazwa parametru jak na wyniku' },
+        value: { type: 'string', description: 'Wynik dokładnie jak na dokumencie, liczba z kropką albo tekst (np. ujemny)' },
+        unit: { type: 'string' },
+        ref_low: { type: 'number', description: 'Dolna granica normy, jeśli podana' },
+        ref_high: { type: 'number', description: 'Górna granica normy, jeśli podana' },
+        abnormal: { type: 'boolean', description: 'Czy wynik jest poza normą' }
+      }, required: ['group', 'code', 'name', 'value', 'abnormal'] } },
+      comment: { type: 'string', description: 'Komentarz po polsku, 3 do 6 zdań' }
+    }, required: ['date', 'results', 'comment'] }
+  };
+  const system = 'Odczytujesz polskie wyniki badań laboratoryjnych. Przepisz WSZYSTKIE parametry z dokumentu, z wartościami, jednostkami i normami dokładnie jak na wyniku. ' +
+    'Grupy: morfologia (pełna morfologia z rozmazem), lipidogram, glukoza, watroba (ALT, AST, GGTP, bilirubina, ALP), nerki (kreatynina, eGFR, mocznik, kwas moczowy, cystatyna), tarczyca (TSH, FT3, FT4), witamina_d, zelazo (ferrytyna, żelazo), mocz (badanie ogólne moczu), hba1c, hormony (testosteron, SHBG, estradiol, prolaktyna), crp, inne. ' +
+    'Osoba: mężczyzna trenujący siłowo kilka razy w tygodniu, faza budowania masy, dieta ok. 3300 kcal i ok. 170 g białka dziennie. ' +
+    'Komentarz: krótko i rzeczowo, bez straszenia. Wymień wyniki poza normą i co mogą oznaczać w kontekście treningu i diety (np. ciężki trening 1 do 2 dni przed badaniem podnosi AST, ALT, CK i kreatyninę, dużo białka podnosi mocznik). ' +
+    'Porównaj z poprzednimi wynikami, jeśli są. Napisz, z czym warto iść do lekarza. Nie stawiaj diagnoz. ' +
+    'Zawsze odpowiadaj wyłącznie wywołaniem narzędzia zapisz_wyniki. Jeśli to nie są wyniki badań, zwróć pustą listę results i wyjaśnij w comment.';
+  const src = { type: 'base64', media_type: mime, data: Utilities.base64Encode(blob.getBytes()) };
+  const content = [mime === 'application/pdf' ? { type: 'document', source: src } : { type: 'image', source: src },
+    { type: 'text', text: 'Odczytaj te wyniki.' + (prev ? '\n\nPoprzednie wyniki (kod, data, wynik):\n' + prev : '') }];
+  const res = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
+    method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+    headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+    payload: JSON.stringify({ model: model, max_tokens: 8000, system: system, tools: [tool], tool_choice: { type: 'auto' }, messages: [{ role: 'user', content: content }] })
+  });
+  const code = res.getResponseCode();
+  let j = {}; try { j = JSON.parse(res.getContentText()); } catch (err) {}
+  if (code !== 200) return { ok: false, final: code === 400, error: 'Claude API: ' + ((j.error && j.error.message) || ('błąd ' + code)) };
+  let tu = (j.content || []).filter(c => c.type === 'tool_use')[0];
+  if (!tu) { const txt = (j.content || []).filter(c => c.type === 'text').map(c => c.text).join('\n'); const m = txt.match(/\{[\s\S]*\}/); try { if (m) tu = { input: JSON.parse(m[0]) }; } catch (err) {} }
+  const inp = tu && tu.input;
+  if (!inp || !inp.results || !inp.results.length) return { ok: false, final: true, error: (inp && inp.comment) || 'nie znalazłem wyników badań w pliku' };
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(inp.date || '') ? inp.date : Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
+  return { ok: true, date: date, lab: String(inp.lab || ''), comment: String(inp.comment || ''), results: inp.results };
+}
+
+function labSave_(ss, r, file) {
+  const sh = ss.getSheetByName(SH.LAB), now = new Date();
+  const codes = {}; r.results.forEach(x => { codes[String(x.code || '').toUpperCase()] = 1; });
+  if (sh.getLastRow() > 1) { const v = sh.getRange(2, 1, sh.getLastRow() - 1, 3).getValues();
+    for (let i = v.length - 1; i >= 0; i--) if (key_(v[i][0]) === r.date && codes[String(v[i][2])]) sh.deleteRow(i + 2); }
+  const num = v => (v === undefined || v === null || v === '' || isNaN(Number(v))) ? '' : Number(v);
+  const rows = r.results.map(x => [toDate_(r.date), LAB_GROUPS.indexOf(x.group) >= 0 ? x.group : 'inne', String(x.code || '').toUpperCase(), String(x.name || ''),
+    isNaN(Number(String(x.value).replace(',', '.'))) ? String(x.value) : Number(String(x.value).replace(',', '.')), String(x.unit || ''), num(x.ref_low), num(x.ref_high), x.abnormal ? 'TAK' : '', file, now]);
+  sh.getRange(sh.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(rows);
+  if (sh.getLastRow() > 2) sh.getRange(2, 1, sh.getLastRow() - 1, 11).sort([{ column: 1, ascending: true }, { column: 2, ascending: true }]);
+  ss.getSheetByName(SH.LABN).appendRow([toDate_(r.date), file, r.lab, r.comment, now]);
+}
+
+function labsData_(ss) {
+  const labs = rows_(ss, SH.LAB, 9).filter(r => r[0] && r[2]).map(r => ({ date: key_(r[0]), group: r[1], code: r[2], name: r[3], value: r[4], unit: r[5], lo: r[6] === '' ? null : r[6], hi: r[7] === '' ? null : r[7], abn: r[8] === 'TAK' }));
+  const labNotes = rows_(ss, SH.LABN, 4).filter(r => r[0]).map(r => ({ date: key_(r[0]), file: r[1], lab: r[2], text: r[3] }));
+  return { labs: labs, labNotes: labNotes, labFolder: 'https://drive.google.com/drive/folders/' + LAB_FOLDER_ID };
+}
+
+function labsDue_(ss) {
+  const last = {}; rows_(ss, SH.LAB, 2).forEach(r => { if (r[0]) { const k = key_(r[0]); if (!last[r[1]] || k > last[r[1]]) last[r[1]] = k; } });
+  const today = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd'), soon = Utilities.formatDate(new Date(Date.now() + 14 * 864e5), TZ, 'yyyy-MM-dd');
+  return LAB_PANEL.filter(p => last[p.g]).map(p => { const d = toDate_(last[p.g]); d.setMonth(d.getMonth() + p.m); const due = Utilities.formatDate(d, TZ, 'yyyy-MM-dd'); return { n: p.n, due: due, over: due < today }; })
+    .filter(x => x.due <= soon);
 }

@@ -187,6 +187,27 @@ h3{font-weight:700;font-size:18px;color:var(--navy);margin:26px 0 10px}
 .err{color:var(--bad);font-size:13px;margin:8px 0 0}
 .li .v.tap{border:0;background:none;text-align:left;padding:0;cursor:pointer}
 .meal .sw{flex:none;border:1.5px solid var(--line);background:var(--surface);border-radius:999px;padding:5px 10px;font-size:12px;font-weight:700;color:var(--navy);margin-top:2px}
+.seg{display:grid;grid-template-columns:1fr 1fr;border:1.5px solid var(--navy);border-radius:999px;overflow:hidden;margin:4px 0 14px}
+.seg button{border:0;background:none;height:40px;font-weight:700;color:var(--navy)}
+.seg button[aria-pressed="true"]{background:var(--navy);color:#fff}
+.labrem{display:flex;gap:10px;align-items:center;background:var(--warn-soft);padding:10px 12px;margin-top:8px;font-size:13.5px}
+.labrem.over{background:var(--bad-soft)}
+.labrem .t{flex:1;min-width:0}
+.labrem button{border:0;background:none;font-weight:700;color:var(--navy);padding:6px 4px;font-size:13px}
+details.lg{background:var(--surface);border:1px solid var(--line);margin-bottom:8px}
+details.lg summary{list-style:none;cursor:pointer;padding:12px 14px;display:flex;align-items:center;gap:8px}
+details.lg summary::-webkit-details-marker{display:none}
+details.lg summary .n{flex:1;font-weight:700;color:var(--navy)}
+details.lg .rows{padding:0 14px 6px}
+.lr{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;padding:8px 0;border-top:1px solid var(--line)}
+.lr .p{font-weight:600;font-size:14px;color:var(--ink)}
+.lr .v{font-weight:800;font-size:15px;color:var(--navy);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.lr .v.abn{color:var(--bad)}
+.lr .s{grid-column:1/3;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.chk-l{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);font-size:14px}
+.chk-l:last-child{border-bottom:0}
+.chk-l .n{flex:1;font-weight:600}
+.aicom{background:var(--accent-soft);padding:12px 14px;font-size:14px;line-height:1.5;color:var(--ink);white-space:pre-line}
 .swapnote{background:var(--warn-soft);color:var(--warn);font-size:13px;font-weight:600;padding:8px 10px;margin-bottom:10px}
 .scan p{color:#fff;margin:0;text-align:center}
 .scan .row{justify-content:center}
@@ -437,6 +458,7 @@ V.train = () => {
   const nx=nextDay(); const ws=weekStart(today());
   const doneW=new Set(S.workouts.filter(w=>weekStart(ymd(w.start))===ws).map(w=>w.dayId));
   let h='';
+  h+=labReminder();
   if(S.demo) h+=`<div class="demo"><span><b>Dane przykładowe.</b> Tak będzie wyglądać po kilku tygodniach.</span><button data-a="clearDemo">Wyczyść</button></div>`;
   if(S.summary){ const s=S.summary;
     h+=`<div class="summary"><h3>${esc(DAY[s.dayId].name)} zapisany</h3><div class="row note" style="color:#fff"><span class="num" style="font-weight:600">${s.min} min</span>·<span class="num" style="font-weight:600">${s.sets} serii</span>·<span class="num" style="font-weight:600">${fN(s.vol/1000,2)} t</span></div>
@@ -504,6 +526,59 @@ V.weight = () => {
   return h;
 };
 function sleepOf(d){ return S.sleep[d]!=null?S.sleep[d]:(S.diet.daily[d]&&S.diet.daily[d].sleep!=null?S.diet.daily[d].sleep:null); }
+/* ---- badania ---- */
+const LAB_PANEL=[{g:'morfologia',n:'Morfologia',m:6},{g:'lipidogram',n:'Lipidogram',m:6},{g:'glukoza',n:'Glukoza',m:6},{g:'watroba',n:'Wątroba (ALT, AST, GGTP)',m:6},
+  {g:'nerki',n:'Nerki (kreatynina, mocznik, kwas moczowy)',m:6},{g:'tarczyca',n:'TSH',m:6},{g:'witamina_d',n:'Witamina D',m:6},{g:'zelazo',n:'Ferrytyna',m:6},
+  {g:'mocz',n:'Badanie moczu',m:6},{g:'hormony',n:'Testosteron i wolny testosteron',m:6},{g:'hba1c',n:'HbA1c',m:12},{g:'crp',n:'CRP',m:12}];
+const LAB_NAMES=Object.assign({inne:'Inne'},...LAB_PANEL.map(p=>({[p.g]:p.n})));
+const fDate=s=>{ const d=dParse(s); return d.getDate()+'.'+pad(d.getMonth()+1)+'.'+d.getFullYear(); };
+const addMonths=(s,m)=>{ const d=dParse(s); d.setMonth(d.getMonth()+m); return ymd(d); };
+function labStatus(){ const L=(S.labs&&S.labs.rows)||[]; const last={}; L.forEach(r=>{ if(!last[r.group]||r.date>last[r.group]) last[r.group]=r.date; });
+  const t=today(), soon=addDays(t,14);
+  return LAB_PANEL.map(p=>{ const l=last[p.g]; if(!l) return Object.assign({},p,{state:'none'}); const due=addMonths(l,p.m); return Object.assign({},p,{last:l,due,state:due<t?'over':due<=soon?'soon':'ok'}); }); }
+function labsDueSoon(){ return labStatus().filter(x=>x.state==='over'||x.state==='soon'); }
+function labReminder(){ const due=labsDueSoon(); if(!due.length) return ''; if(S.labSnooze && S.labSnooze>today()) return '';
+  const over=due.some(x=>x.state==='over'); const first=due.map(x=>x.due).sort()[0];
+  return `<div class="labrem${over?' over':''}"><span class="t"><b>Badania krwi:</b> ${over?'po terminie od '+fDate(first):'termin '+fDate(first)}. ${due.length>3?due.length+' badań do powtórzenia.':esc(due.map(x=>x.n).join(', '))+'.'}</span><button data-a="labGo">Zobacz</button><button data-a="labSnooze">Za tydzień</button></div>`; }
+function segTabs(){ const b=S.measTab==='badania'; return `<h2>Pomiary</h2><div class="seg"><button data-a="measTab" data-v="obwody" aria-pressed="${!b}">Obwody</button><button data-a="measTab" data-v="badania" aria-pressed="${b}">Badania</button></div>`; }
+let labBusy=false, labMsg='';
+function labsView(){
+  const L=S.labs||{rows:[],notes:[]}; const rows=L.rows||[]; const st=labStatus(); const done=st.filter(x=>x.state!=='none');
+  let h=segTabs()+`<p class="lede">Wrzuć PDF albo zdjęcie wyników do folderu na Dysku i kliknij „Pobierz badania”. Badania rób rano, na czczo, 48 godzin po ostatnim ciężkim treningu.</p>`;
+  const next=done.length?done.map(x=>x.due).sort()[0]:null; const over=done.some(x=>x.state==='over');
+  h+=`<div class="dsum"><div style="font-size:12px;color:#B9C7D0">Następne badania</div><div class="big" style="font-size:26px;margin-top:4px">${next?(over?'Po terminie':fDate(next)):'Brak wyników'}</div>
+    <div style="font-size:12.5px;color:#B9C7D0;margin-top:6px">${next?(over?'Termin minął '+fDate(next)+'. Czas powtórzyć.':'Co pół roku, raz w roku HbA1c i CRP.'):'Zrób pierwsze badania z listy poniżej.'}</div></div>`;
+  h+=`<div class="row mt"><button class="btn primary" style="flex:1" data-a="labScan"${labBusy?' disabled':''}>${labBusy?'Czytam wyniki…':'Pobierz badania'}</button><a class="btn" style="flex:1" href="${esc(L.folder||'https://drive.google.com/drive/folders/1dOgnkqM5IOa_v8cAQup33SJmkBnL5RYB')}" target="_blank" rel="noopener">Folder na Dysku</a></div>`;
+  if(labMsg) h+=`<p class="note">${esc(labMsg)}</p>`;
+  const notes=(L.notes||[]).slice().sort((a,b)=>a.date<b.date?1:-1);
+  if(notes.length) h+=`<h3>Komentarz · ${fDate(notes[0].date)}</h3><div class="aicom">${esc(notes[0].text)}</div><p class="note">To nie jest diagnoza. Wyniki poza normą skonsultuj z lekarzem.</p>`;
+  if(rows.length){ const byCode={}; rows.slice().sort((a,b)=>a.date<b.date?-1:1).forEach(r=>{ (byCode[r.code]=byCode[r.code]||[]).push(r); });
+    const groups={}; Object.values(byCode).forEach(list=>{ const l=list[list.length-1]; (groups[l.group]=groups[l.group]||[]).push({l, prev:list.length>1?list[list.length-2]:null}); });
+    h+=`<h3>Ostatnie wyniki</h3>`;
+    [...LAB_PANEL.map(p=>p.g),'inne'].forEach(g=>{ const it=groups[g]; if(!it) return; const abn=it.filter(x=>x.l.abn).length; const d=it.map(x=>x.l.date).sort().pop();
+      h+=`<details class="lg"${abn?' open':''}><summary><span class="n">${esc(LAB_NAMES[g]||g)}</span>${abn?`<span class="pill bad">${abn} poza normą</span>`:'<span class="pill done">w normie</span>'}<span class="note">${fDate(d)}</span></summary><div class="rows">`+
+        it.map(({l,prev})=>{ const norm=l.lo!=null&&l.hi!=null?'norma '+fN(l.lo,2)+' do '+fN(l.hi,2):l.hi!=null?'norma do '+fN(l.hi,2):l.lo!=null?'norma od '+fN(l.lo,2):'';
+          const pv=prev?'poprzednio '+(typeof prev.value==='number'?fN(prev.value,2):esc(prev.value))+' ('+fDate(prev.date)+')':'';
+          const val=typeof l.value==='number'?fN(l.value,2):esc(l.value);
+          return `<div class="lr"><span class="p">${esc(l.name)}</span><span class="v${l.abn?' abn':''}">${val} <small style="font-weight:500;color:var(--muted)">${esc(l.unit||'')}</small></span><span class="s">${[norm,pv].filter(Boolean).join(' · ')}</span></div>`; }).join('')+`</div></details>`; }); }
+  h+=`<h3>Lista badań</h3><div class="panel">`+st.map(x=>{ const pill=x.state==='none'?'<span class="pill opt">brak</span>':x.state==='over'?'<span class="pill bad">po terminie</span>':x.state==='soon'?'<span class="pill warn">wkrótce</span>':'<span class="pill done">do '+fDate(x.due)+'</span>';
+    return `<div class="chk-l"><span class="n">${esc(x.n)}<span class="note" style="display:block;font-weight:400">${x.m===12?'raz w roku':'co pół roku'}${x.last?' · ostatnio '+fDate(x.last):''}</span></span>${pill}</div>`; }).join('')+`</div>`;
+  if(notes.length>1) h+=`<details class="lg mt"><summary><span class="n">Wcześniejsze komentarze</span></summary><div class="rows">${notes.slice(1).map(n=>`<p class="note" style="margin:10px 0 2px"><b>${fDate(n.date)}</b></p><div class="aicom">${esc(n.text)}</div>`).join('')}</div></details>`;
+  return h;
+}
+async function labScan(){
+  const st=S.settings; if(!st.url){ labMsg='Najpierw połącz apkę z arkuszem w Ustawieniach.'; render(); return; }
+  labBusy=true; labMsg=''; render();
+  try{ const ctl=new AbortController(); const to=setTimeout(()=>ctl.abort(),300000);
+    const r=await fetch(st.url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({token:st.token,action:'labsScan'}),signal:ctl.signal}); clearTimeout(to);
+    const j=await r.json();
+    if(!j.ok) labMsg=/Nieznany|action/i.test(j.error||'')?'Arkusz nie ma jeszcze tej funkcji.':(j.error||'Nie udało się odczytać.');
+    else { const n=(j.done||[]).length; labMsg=n?('Odczytano '+n+(n===1?' plik':' pliki')+': '+j.done.map(d=>d.n+' wyników z '+fDate(d.date)).join(', ')+'.'):'Brak nowych plików w folderze.';
+      if(j.bad&&j.bad.length) labMsg+=' Nie odczytałem: '+j.bad.join('; ')+'. Takie pliki są w podfolderze „Nieodczytane”.';
+      if(n) toast('Pobrano wyniki badań'); await fetchDiet(true); }
+  }catch(e){ labMsg='Nie udało się połączyć z arkuszem. Spróbuj ponownie.'; }
+  labBusy=false; if(S.view==='measure') render();
+}
 function lastSleep(){ const ks=Object.keys(S.sleep).sort(); return ks.length?S.sleep[ks[ks.length-1]]:null; }
 function sleepStepsPanel(){
   const t=today(); const days=[...Array(7)].map((_,i)=>addDays(t,-i));
@@ -512,9 +587,10 @@ function sleepStepsPanel(){
   const a=x=>x.length?x.reduce((p,q)=>p+ +q,0)/x.length:null; const as=a(sl), at=a(st);
   return `<div class="strip mt" style="grid-template-columns:1fr 1fr"><div><div class="label">Sen śr. 7 dni</div><div class="v">${as==null?'–':fN(as)}<small>h</small></div></div><div><div class="label">Kroki śr. 7 dni</div><div class="v">${at==null?'–':Math.round(at).toLocaleString('pl-PL')}</div></div></div>${st.length?'':'<p class="note">Kroki dochodzą ze Skrótów iOS raz dziennie wieczorem.</p>'}`;
 }
-V.measure = () => {
+V.measure = () => S.measTab==='badania' ? labsView() : V.measureObw();
+V.measureObw = () => {
   const ms=S.measures.slice().sort((a,b)=>a.date<b.date?-1:1); const last=ms[ms.length-1], prev=ms[ms.length-2];
-  let h=`<h2>Pomiary</h2><p class="lede">Co 2 do 4 tygodni, rano, taśmą w tych samych miejscach. Ramię mierz napięte.</p>
+  let h=`${segTabs()}<p class="lede">Co 2 do 4 tygodni, rano, taśmą w tych samych miejscach. Ramię mierz napięte.</p>
   <div class="panel"><div class="field"><label class="label" for="mdate">Data</label><input type="date" id="mdate" value="${today()}"></div>
   <div class="grid2 mt">${MEAS.map(m=>`<div class="field"><label class="label" for="m-${m.k}">${m.l} (cm)</label><input id="m-${m.k}" inputmode="decimal" placeholder="${last&&last[m.k]!=null?fN(last[m.k]):''}"></div>`).join('')}</div>
   <div class="field mt"><label class="label" for="mbf">Tkanka tłuszczowa (% , opcjonalnie)</label><input id="mbf" inputmode="decimal" placeholder="${last&&last.bf!=null?fN(last.bf):''}"></div>
@@ -562,7 +638,8 @@ async function fetchDiet(force){
         const byDate={}; S.weights.forEach(w=>{ byDate[w.date]=w; });
         j.weights.forEach(w=>{ if(!pendW.has(w.date) && w.kg) byDate[w.date]={date:w.date,kg:w.kg}; });
         S.weights=Object.values(byDate); }
-      S.diet.fetched=Date.now(); save(); if(S.view==='diet' || (S.view==='weight' && !document.activeElement.matches('input'))) render(); }
+      if(j.labs) S.labs={rows:j.labs, notes:j.labNotes||[], folder:j.labFolder||''};
+      S.diet.fetched=Date.now(); save(); if(S.view==='diet' || ((S.view==='weight'||S.view==='measure') && !document.activeElement.matches('input'))) render(); }
   }catch(e){}
   dietFetching=false;
 }
@@ -732,7 +809,7 @@ V.settings = () => {
   <p class="note">„Pobierz z arkusza” przywraca historię, np. na nowym telefonie. Kopia zapasowa kopiuje wszystkie dane jako tekst.</p>
   <div class="field mt"><label class="label" for="restore">Wklej kopię zapasową</label><textarea id="restore" placeholder='{"workouts":[…]}'></textarea></div>
   <button class="btn mt" data-a="restore" data-confirm="1">Wczytaj kopię</button></div>
-  <p class="note mt">Wersja 1.6 · plan: Push A, Pull A, Push B, Pull B, Nogi</p>`;
+  <p class="note mt">Wersja 1.7 · plan: Push A, Pull A, Push B, Pull B, Nogi</p>`;
 };
 
 /* ============ render ============ */
@@ -749,7 +826,7 @@ window.addEventListener('online',()=>{ sync(); fetchDiet(true); });
 
 /* ============ actions ============ */
 const A = {
-  nav(b){ const v=b.dataset.v; if(v==='train' && S.active) S.view='workout'; else S.view=v; if(v==='diet'){ S.dietDate=today(); draft=null; aiDraft=null; fetchDiet(); } if(v==='weight') fetchDiet(); save(); render(); window.scrollTo(0,0); },
+  nav(b){ const v=b.dataset.v; if(v==='train' && S.active) S.view='workout'; else S.view=v; if(v==='diet'){ S.dietDate=today(); draft=null; aiDraft=null; fetchDiet(); } if(v==='weight'||v==='measure') fetchDiet(); save(); render(); window.scrollTo(0,0); },
   start(b){ if(S.active && S.active.dayId!==b.dataset.v){ S.view='workout'; render(); return; } if(S.active){ S.view='workout'; render(); return; } startWorkout(b.dataset.v); window.scrollTo(0,0); },
   tick(b){ unlockAudio(); const i=+b.dataset.i, j=+b.dataset.j; const s=S.active.ex[i].sets[j]; s.done=!s.done; s.ts=Date.now(); save(); rerenderCard(i);
     if(s.done){ const d=EX[S.active.ex[i].exId]; const lastEx=i===S.active.ex.length-1 && S.active.ex[i].sets.every(x=>x.done); if(!lastEx) startRest(d.rest, d.name); } },
@@ -828,6 +905,10 @@ const A = {
   scanClose(){ closeScanner(); },
   eanGo(){ const c=$('#eanin').value; closeScanner(); lookupEan(c); },
   dietRefresh(b,e){ e&&e.preventDefault(); fetchDiet(true); },
+  measTab(b){ S.measTab=b.dataset.v; save(); render(); if(S.measTab==='badania') fetchDiet(true); },
+  labGo(){ S.view='measure'; S.measTab='badania'; save(); render(); window.scrollTo(0,0); fetchDiet(true); },
+  labSnooze(){ S.labSnooze=addDays(today(),7); save(); render(); },
+  labScan(){ labScan(); },
   saveGoals(){ const k=num($('#gkcal').value), p=num($('#gprot').value); if(!k||k<1000||k>8000) return flash($('#gkcal')); if(!p||p<30||p>500) return flash($('#gprot')); S.settings.kcal=k; S.settings.protein=p; applyGoals(); save(); $('#setmsg').textContent='Zapisano cele: '+k+' kcal, '+p+' g białka.'; },
   restore(){ try{ const j=JSON.parse($('#restore').value); ['workouts','weights','measures'].forEach(k=>{ if(Array.isArray(j[k])) S[k]=j[k]; }); S.demo=false; save(); render(); }
     catch(e){ flash($('#restore')); } },
