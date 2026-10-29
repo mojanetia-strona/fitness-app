@@ -9,10 +9,10 @@
  */
 
 const TZ = 'Europe/Warsaw';
-const SH = { DASH:'Dashboard', TRAIN:'Treningi', SETS:'Serie', WEIGHT:'Waga', MEAS:'Pomiary', REC:'Rekordy', WEEK:'Tygodnie', PLAN:'Plan', CAT:'Catering', FOOD:'Jedzenie', DIET:'Dieta', DAILY:'Codziennie', REP:'Raporty', LAB:'Badania', LABN:'Badania AI' };
+const SH = { DASH:'Dashboard', TRAIN:'Treningi', SETS:'Serie', WEIGHT:'Waga', MEAS:'Pomiary', REC:'Rekordy', WEEK:'Tygodnie', PLAN:'Plan', CAT:'Catering', FOOD:'Jedzenie', DIET:'Dieta', DAILY:'Codziennie', REP:'Raporty', LAB:'Badania', LABN:'Badania AI', CARDIO:'Cardio', PROD:'Produkty' };
 const REPORT_TO = 'glowadzkilukasz@gmail.com';
 const APP_URL = 'https://mojanetia-strona.github.io/fitness-app/';
-const MUSCLE = { bench:'Klatka', incdb:'Klatka', flatdb:'Klatka', cablefly:'Klatka', ohp:'Barki', latraise:'Barki', facepull:'Barki', cgskull:'Triceps', ohext:'Triceps', pushdown:'Triceps', dips:'Triceps', deadlift:'Plecy', wpullup:'Plecy', bbrow:'Plecy', latpull:'Plecy', csrow:'Plecy', bbcurl:'Biceps', hammer:'Biceps', inclcurl:'Biceps', cablecurl:'Biceps', squat:'Nogi', legpress:'Nogi', legcurl:'Nogi', calf:'Nogi' };
+const MUSCLE = { smithinc:'Klatka', chestpress:'Klatka', pecdeck:'Klatka', dbfly:'Klatka', dbohp:'Barki', machohp:'Barki', cablelat:'Barki', reardelt:'Barki', ropepush:'Triceps', dbskull:'Triceps', cgbench:'Triceps', machdip:'Triceps', dbcurl:'Biceps', preacher:'Biceps', ezcurl:'Biceps', concurl:'Biceps', tbarchest:'Plecy', dbrow:'Plecy', seatrow:'Plecy', ulat:'Plecy', pullover:'Plecy', pullup:'Plecy', rdl:'Plecy', rackpull:'Plecy', legext:'Nogi', seatcurl:'Nogi', seatcalf:'Nogi', hack:'Nogi', smithsq:'Nogi', lunge:'Nogi', bench:'Klatka', incdb:'Klatka', flatdb:'Klatka', cablefly:'Klatka', ohp:'Barki', latraise:'Barki', facepull:'Barki', cgskull:'Triceps', ohext:'Triceps', pushdown:'Triceps', dips:'Triceps', deadlift:'Plecy', wpullup:'Plecy', bbrow:'Plecy', latpull:'Plecy', csrow:'Plecy', bbcurl:'Biceps', hammer:'Biceps', inclcurl:'Biceps', cablecurl:'Biceps', squat:'Nogi', legpress:'Nogi', legcurl:'Nogi', calf:'Nogi' };
 const C = {
   ink:'#1D1D1D', muted:'#5B6770', line:'#E3E7EA', band:'#F5F5F5', head:'#00283D', headTxt:'#FFFFFF',
   accent:'#0079C2', accentSoft:'#E5F2FA', good:'#0079C2', goodSoft:'#E5F2FA', warnSoft:'#FFF3DF', bad:'#D0105B', pink:'#EE1264',
@@ -109,8 +109,8 @@ function setup() {
   const dash = sheet_(ss, SH.DASH);
   dataSheet_(ss, SH.TRAIN, ['ID','Data','Dzień','Start','Koniec','Czas (min)','Serie','Objętość (kg)'],
     [120,100,90,70,70,90,70,110], {B:'d mmm yyyy', D:'HH:mm', E:'HH:mm', H:'#,##0'});
-  dataSheet_(ss, SH.SETS, ['ID treningu','Data','Dzień','Ćwiczenie','Seria','Kg','Powt.','e1RM','Objętość','ID ćwiczenia'],
-    [120,100,80,280,60,70,60,80,90,100], {B:'d mmm yyyy', F:'0.0#', H:'0.0', I:'#,##0'});
+  dataSheet_(ss, SH.SETS, ['ID treningu','Data','Dzień','Ćwiczenie','Seria','Kg','Powt.','e1RM','Objętość','ID ćwiczenia','Partia'],
+    [120,100,80,280,60,70,60,80,90,100,80], {B:'d mmm yyyy', F:'0.0#', H:'0.0', I:'#,##0'});
   dataSheet_(ss, SH.WEIGHT, ['Data','Waga (kg)','Średnia 7 dni','Zmiana tydz. (kg)'],
     [110,100,120,140], {A:'d mmm yyyy', B:'0.0', C:'0.00', D:'+0.00;-0.00;0.00'});
   dataSheet_(ss, SH.MEAS, ['Data','Ramię','Przedramię','Klatka','Talia','Udo','Łydka','Tłuszcz %'],
@@ -121,6 +121,7 @@ function setup() {
   dataSheet_(ss, SH.FOOD, ['ID','Data','Godzina','Źródło','Nazwa','Ilość','kcal','Białko','Węgle','Tłuszcz','Kod EAN'],
     [110,100,70,90,280,70,70,70,70,70,120], {B:'d mmm yyyy', C:'HH:mm', G:'0', H:'0.0', I:'0.0', J:'0.0', K:'@'});
   buildDiet_(ss);
+  cardioSheet_(ss); prodSheet_(ss);
   dataSheet_(ss, SH.DAILY, ['Data','Kroki','Sen (h)'], [110,90,90], {A:'d mmm yyyy', B:'#,##0', C:'0.0'});
   dataSheet_(ss, SH.REP, ['Tydzień od','Data wpisu','Komentarz trenera','Zalecenia','Wysłano'], [100,130,520,420,130], {A:'d mmm yyyy', B:'d mmm yyyy HH:mm', E:'d mmm yyyy HH:mm'});
   ss.getSheetByName(SH.REP).getRange('C2:D').setWrap(true).setVerticalAlignment('top');
@@ -131,7 +132,7 @@ function setup() {
   buildDashboard_(ss, dash);
 
   // kolejność i sprzątanie
-  [SH.DASH, SH.DIET, SH.TRAIN, SH.SETS, SH.WEIGHT, SH.MEAS, SH.DAILY, SH.CAT, SH.FOOD, SH.REP, SH.REC, SH.WEEK, SH.PLAN].forEach((n, i) => {
+  [SH.DASH, SH.DIET, SH.TRAIN, SH.SETS, SH.CARDIO, SH.WEIGHT, SH.MEAS, SH.DAILY, SH.CAT, SH.FOOD, SH.PROD, SH.REP, SH.REC, SH.WEEK, SH.PLAN].forEach((n, i) => {
     ss.setActiveSheet(ss.getSheetByName(n)); ss.moveActiveSheet(i + 1);
   });
   ['Arkusz1','Sheet1'].forEach(n => { const s = ss.getSheetByName(n); if (s && s.getLastRow() === 0) ss.deleteSheet(s); });
@@ -336,6 +337,7 @@ function doGet(e) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   if (p.action === 'pull') return json_(Object.assign({ ok: true }, pullAll_(ss), dietRange_(ss, '', '')));
   if (p.action === 'daily') return json_(dailyFromShortcut_(ss, p));
+  if (p.action === 'ean') return json_(eanLookup_(ss, p.code)); // test z przeglądarki
   if (p.action === 'diet') return json_(Object.assign({ ok: true }, dietRange_(ss, p.from || '', p.to || '')));
   return json_({ ok: true, name: ss.getName() });
 }
@@ -346,6 +348,9 @@ function doPost(e) {
   if (body.token !== getToken_()) return json_({ ok: false, error: 'Zły token' });
   if (body.action === 'labsScan') {
     try { return json_(processLabFolder()); } catch (err) { return json_({ ok: false, error: err.message }); }
+  }
+  if (body.action === 'ean') {
+    try { return json_(eanLookup_(SpreadsheetApp.getActiveSpreadsheet(), body.code)); } catch (err) { return json_({ ok: false, error: err.message }); }
   }
   if (body.action === 'estimate') {
     try { return json_(estimate_(body.text)); } catch (err) { return json_({ ok: false, error: err.message }); }
@@ -458,6 +463,8 @@ function handle_(ss, it) {
     case 'food':       saveFood_(ss, d); break;
     case 'daily':      upsertDaily_(ss, d.date, d, 'ręcznie'); break;
     case 'delFood':    deleteWhere_(ss.getSheetByName(SH.FOOD), 1, d.id); break;
+    case 'cardio':     saveCardio_(ss, d); break;
+    case 'delCardio':  deleteWhere_(cardioSheet_(ss), 1, d.id); break;
     default: throw new Error('Nieznany typ ' + it.type);
   }
 }
@@ -468,7 +475,9 @@ function saveWorkout_(ss, w) {
   const date = toDate_(w.date);
   const vol = w.sets.reduce((n, s) => n + s.kg * s.reps, 0);
   tr.appendRow([w.id, date, w.day, new Date(w.start), new Date(w.end), Math.round((w.end - w.start) / 60000), w.sets.length, vol]);
-  const rows = w.sets.map(s => [w.id, date, w.day, s.ex, s.set, s.kg, s.reps, e1rm_(s.kg, s.reps), s.kg * s.reps, s.exId]);
+  if (st.getMaxColumns() < 11) { st.insertColumnAfter(10); }
+  if (st.getRange(1, 11).getValue() === '') st.getRange(1, 11).setValue('Partia').setFontWeight('bold').setBackground(C.head).setFontColor(C.headTxt);
+  const rows = w.sets.map(s => [w.id, date, w.day, s.ex, s.set, s.kg, s.reps, e1rm_(s.kg, s.reps), s.kg * s.reps, s.exId, s.m || MUSCLE[s.exId] || 'Inne']);
   if (rows.length) st.getRange(st.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(rows);
   if (tr.getLastRow() > 2) tr.getRange(2, 1, tr.getLastRow() - 1, tr.getLastColumn()).sort([{ column: 2, ascending: true }, { column: 4, ascending: true }]);
   colorDays_(tr);
@@ -497,6 +506,7 @@ function saveFood_(ss, f) {
   const sh = ss.getSheetByName(SH.FOOD);
   deleteWhere_(sh, 1, f.id);
   sh.appendRow([f.id, toDate_(f.date), f.time ? new Date(f.time) : '', f.source || 'Ręcznie', f.name, f.amount || '', f.kcal || 0, f.p || 0, f.c || 0, f.f || 0, f.ean ? String(f.ean) : '']);
+  if (f.ean && f.per100 && f.per100.kcal != null) prodSave_(ss, String(f.ean), { name: f.name, per100: f.per100, pkg: f.amount || '' }, 'potwierdzone w apce');
   if (sh.getLastRow() > 2) sh.getRange(2, 1, sh.getLastRow() - 1, sh.getLastColumn()).sort([{ column: 2, ascending: true }, { column: 3, ascending: true }]);
 }
 
@@ -562,9 +572,9 @@ function pullAll_(ss) {
     const start = r[3] instanceof Date ? r[3].getTime() : toDate_(key_(r[1])).getTime();
     byId[r[0]] = { id: String(r[0]), dayId: dayIds[r[2]] || r[2], start: start, end: r[4] instanceof Date ? r[4].getTime() : start, ex: [] };
   });
-  if (st.getLastRow() > 1) st.getRange(2, 1, st.getLastRow() - 1, 10).getValues().forEach(r => {
+  if (st.getLastRow() > 1) st.getRange(2, 1, st.getLastRow() - 1, Math.min(11, st.getMaxColumns())).getValues().forEach(r => {
     const w = byId[r[0]]; if (!w) return;
-    let e = w.ex.find(x => x.exId === r[9]); if (!e) { e = { exId: r[9], sets: [] }; w.ex.push(e); }
+    let e = w.ex.find(x => x.exId === r[9]); if (!e) { e = { exId: r[9], name: r[3], m: r[10] || MUSCLE[r[9]] || 'Inne', sets: [] }; w.ex.push(e); }
     e.sets.push({ kg: Number(r[5]) || 0, reps: Number(r[6]) || 0, done: true });
   });
   const ws = ss.getSheetByName(SH.WEIGHT), ms = ss.getSheetByName(SH.MEAS);
@@ -572,11 +582,107 @@ function pullAll_(ss) {
   const measures = ms.getLastRow() > 1 ? ms.getRange(2, 1, ms.getLastRow() - 1, 8).getValues().filter(r => r[0]).map(r => {
     const o = { date: key_(r[0]) }; MEAS_COLS.forEach((k, i) => { if (r[i + 1] !== '') o[k] = Number(r[i + 1]); }); return o;
   }) : [];
-  return { workouts: Object.keys(byId).map(k => byId[k]), weights: weights, measures: measures };
+  return { workouts: Object.keys(byId).map(k => byId[k]), weights: weights, measures: measures, cardio: cardioRows_(ss) };
 }
 
 function json_(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
 
+
+/* ================= CARDIO ================= */
+function cardioSheet_(ss) {
+  return ss.getSheetByName(SH.CARDIO) || dataSheet_(ss, SH.CARDIO, ['ID', 'Data', 'Rodzaj', 'Dystans (km)', 'Czas (min)', 'Śr. prędkość (km/h)'],
+    [120, 100, 150, 110, 100, 140], { B: 'd mmm yyyy', D: '0.0#', E: '0', F: '0.0' });
+}
+function saveCardio_(ss, c) {
+  const sh = cardioSheet_(ss); deleteWhere_(sh, 1, c.id);
+  const km = numIn_(c.km), mn = numIn_(c.min);
+  sh.appendRow([c.id, toDate_(c.date), c.type || 'Inne', km === null ? '' : km, mn === null ? '' : mn, km && mn ? Math.round(km / (mn / 60) * 10) / 10 : '']);
+  if (sh.getLastRow() > 2) sh.getRange(2, 1, sh.getLastRow() - 1, 6).sort({ column: 2, ascending: true });
+}
+function cardioRows_(ss) {
+  const sh = ss.getSheetByName(SH.CARDIO); if (!sh || sh.getLastRow() < 2) return [];
+  return sh.getRange(2, 1, sh.getLastRow() - 1, 5).getValues().filter(r => r[0])
+    .map(r => ({ id: String(r[0]), date: key_(r[1]), type: String(r[2]), km: r[3] === '' ? '' : Number(r[3]), min: Number(r[4]) || 0 }));
+}
+
+/* ================= PRODUKTY (kody kreskowe) ================= */
+// Kolejność: zakładka Produkty (wspólna pamięć) → Open Food Facts → Claude z wyszukiwarką internetową.
+function prodSheet_(ss) {
+  return ss.getSheetByName(SH.PROD) || dataSheet_(ss, SH.PROD, ['Kod EAN', 'Nazwa', 'kcal / 100 g', 'Białko', 'Węgle', 'Tłuszcz', 'Opakowanie (g)', 'Porcja (g)', 'Źródło', 'Aktualizacja'],
+    [130, 280, 90, 70, 70, 70, 110, 90, 150, 130], { A: '@', C: '0', D: '0.0', E: '0.0', F: '0.0', J: 'd mmm yyyy HH:mm' });
+}
+function prodGet_(ss, code) {
+  const sh = prodSheet_(ss); if (sh.getLastRow() < 2) return null;
+  const v = sh.getRange(2, 1, sh.getLastRow() - 1, 9).getValues();
+  for (let i = 0; i < v.length; i++) if (String(v[i][0]) === code && v[i][2] !== '') {
+    const r = v[i]; return { name: r[1], per100: { kcal: Number(r[2]), p: Number(r[3]) || 0, c: Number(r[4]) || 0, f: Number(r[5]) || 0 }, pkg: Number(r[6]) || null, srv: Number(r[7]) || null, src: String(r[8] || 'arkusz') };
+  }
+  return null;
+}
+function prodSave_(ss, code, p, src) {
+  const sh = prodSheet_(ss); deleteWhere_(sh, 1, code);
+  const r1 = v => Math.round((Number(v) || 0) * 10) / 10;
+  sh.appendRow([code, p.name || '', Math.round(Number(p.per100.kcal) || 0), r1(p.per100.p), r1(p.per100.c), r1(p.per100.f), p.pkg || '', p.srv || '', src, new Date()]);
+  sh.getRange(sh.getLastRow(), 1).setNumberFormat('@').setValue(code);
+}
+function eanLookup_(ss, code) {
+  code = String(code || '').replace(/\D/g, ''); if (!code) return { ok: false, error: 'Brak kodu' };
+  let p = prodGet_(ss, code); if (p) return { ok: true, product: p };
+  let hint = '';
+  const off = offFetch_(code); if (off && off.per100) { prodSave_(ss, code, off, 'Open Food Facts'); return { ok: true, product: Object.assign(off, { src: 'Open Food Facts' }) }; }
+  if (off && off.name) hint = off.name;
+  const ai = aiEan_(code, hint);
+  if (ai && ai.per100) { prodSave_(ss, code, ai, 'Claude (internet)'); return { ok: true, product: Object.assign(ai, { src: 'Claude (internet)' }) }; }
+  return { ok: true, product: null, hint: hint, note: ai && ai.error ? ai.error : '' };
+}
+function offFetch_(code) {
+  const hosts = ['https://world.openfoodfacts.org', 'https://pl.openfoodfacts.org'];
+  for (let h = 0; h < hosts.length; h++) {
+    try {
+      const r = UrlFetchApp.fetch(hosts[h] + '/api/v2/product/' + code + '.json?fields=product_name,product_name_pl,brands,nutriments,serving_quantity,product_quantity',
+        { muteHttpExceptions: true, headers: { 'User-Agent': 'ZelaznyDziennik/1.9 (glowadzkilukasz@gmail.com)' } });
+      if (r.getResponseCode() !== 200) continue;
+      const j = JSON.parse(r.getContentText()); if (j.status !== 1 || !j.product) return null;
+      const P = j.product, n = P.nutriments || {};
+      const name = [P.brands && String(P.brands).split(',')[0], P.product_name_pl || P.product_name].filter(Boolean).join(' ').trim();
+      let kcal = n['energy-kcal_100g'] != null ? Number(n['energy-kcal_100g']) : (n['energy-kj_100g'] != null ? n['energy-kj_100g'] / 4.184 : (n['energy_100g'] != null ? n['energy_100g'] / 4.184 : null));
+      if (kcal === null || isNaN(kcal)) return { name: name };
+      return { name: name || ('Produkt ' + code), per100: { kcal: kcal, p: Number(n.proteins_100g) || 0, c: Number(n.carbohydrates_100g) || 0, f: Number(n.fat_100g) || 0 }, pkg: Number(P.product_quantity) || null, srv: Number(P.serving_quantity) || null };
+    } catch (e) {}
+  }
+  return null;
+}
+function aiEan_(code, hint) {
+  const props = PropertiesService.getScriptProperties(); const key = props.getProperty('ANTHROPIC_API_KEY');
+  if (!key) return { error: 'Brak klucza API Claude' };
+  const model = props.getProperty('CLAUDE_MODEL') || 'claude-sonnet-5-5';
+  const tool = { name: 'zapisz_produkt', description: 'Zapisuje znaleziony produkt i jego wartości odżywcze na 100 g (lub 100 ml).',
+    input_schema: { type: 'object', properties: {
+      found: { type: 'boolean', description: 'true tylko gdy znaleziono ten konkretny produkt (ten kod EAN) i jego tabelę wartości odżywczych' },
+      name: { type: 'string', description: 'Marka i nazwa produktu po polsku, np. "Piątnica Skyr naturalny"' },
+      kcal: { type: 'number' }, protein: { type: 'number' }, carbs: { type: 'number' }, fat: { type: 'number' },
+      package_g: { type: 'number', description: 'Masa lub objętość całego opakowania w g/ml, jeśli znana' } }, required: ['found'] } };
+  const msgs = [{ role: 'user', content: 'Kod kreskowy EAN: ' + code + (hint ? ' (prawdopodobnie: ' + hint + ')' : '') + '. Produkt kupiony w Polsce. '
+    + 'Znajdź w internecie, jaki to produkt, i jego wartości odżywcze na 100 g (dla napojów na 100 ml) z etykiety: kalorie, białko, węglowodany, tłuszcz. '
+    + 'Szukaj po samym kodzie i po nazwie (sklepy internetowe, strony producentów, bazy produktów). Na koniec wywołaj zapisz_produkt. Jeśli nie masz pewności co do produktu, ustaw found=false.' }];
+  const tools = [{ type: 'web_search_20250305', name: 'web_search', max_uses: 5 }, tool];
+  for (let turn = 0; turn < 4; turn++) {
+    const res = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', { method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+      headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+      payload: JSON.stringify({ model: model, max_tokens: 2048, tools: tools, messages: msgs }) });
+    let j = {}; try { j = JSON.parse(res.getContentText()); } catch (e) {}
+    if (res.getResponseCode() !== 200) return { error: 'Claude API: ' + ((j.error && j.error.message) || res.getResponseCode()) };
+    const tu = (j.content || []).filter(c => c.type === 'tool_use' && c.name === 'zapisz_produkt')[0];
+    if (tu) { const x = tu.input || {};
+      if (!x.found || x.kcal == null) return { error: 'nie znaleziono' };
+      return { name: String(x.name || ('Produkt ' + code)).slice(0, 90), per100: { kcal: Number(x.kcal) || 0, p: Number(x.protein) || 0, c: Number(x.carbs) || 0, f: Number(x.fat) || 0 }, pkg: Number(x.package_g) || null, srv: null }; }
+    if (j.stop_reason === 'pause_turn') { msgs.push({ role: 'assistant', content: j.content }); continue; }
+    return { error: 'nie znaleziono' };
+  }
+  return { error: 'nie znaleziono' };
+}
+// Test z edytora: wybierz testEan i kliknij Uruchom, wynik w Dzienniku wykonania.
+function testEan() { Logger.log(JSON.stringify(eanLookup_(SpreadsheetApp.getActiveSpreadsheet(), '5900617041685'))); }
 
 /* ================= KROKI I SEN ================= */
 // Skróty iOS: ?action=daily&token=…&steps=…&sleep=…&kg=…  (każdy parametr opcjonalny)
@@ -654,9 +760,10 @@ function weekStats_(ss) {
   const wLast = W.length ? W[W.length - 1].kg : null;
   // treningi
   const TR = rows_(ss, SH.TRAIN, 8).filter(r => r[0] && inW(key_(r[1])));
-  const SE = rows_(ss, SH.SETS, 10).filter(r => r[0]);
+  const seSh = ss.getSheetByName(SH.SETS);
+  const SE = rows_(ss, SH.SETS, Math.min(11, seSh ? seSh.getMaxColumns() : 10)).filter(r => r[0]);
   const seW = SE.filter(r => inW(key_(r[1])));
-  const muscles = {}; seW.forEach(r => { const m = MUSCLE[r[9]] || 'Inne'; muscles[m] = (muscles[m] || 0) + 1; });
+  const muscles = {}; seW.forEach(r => { const m = MUSCLE[r[9]] || r[10] || 'Inne'; muscles[m] = (muscles[m] || 0) + 1; });
   const best = {}, bestBefore = {};
   SE.forEach(r => { const k = key_(r[1]); const e = Number(r[7]) || 0; const ex = r[3];
     if (inW(k)) { if (!best[ex] || e > best[ex].e) best[ex] = { e: e, kg: r[5], reps: r[6] }; }
@@ -678,6 +785,7 @@ function weekStats_(ss) {
   return { from: from, to: to, mon: mon, sun: sun, wNow: wNow, wPrev: wPrev, wLast: wLast, wDays: W.filter(x => inW(x.k)).length,
     trainings: TR.map(r => ({ day: r[2], date: key_(r[1]), sets: r[6], vol: r[7], min: r[5] })), sets: seW.length, vol: seW.reduce((a, r) => a + (Number(r[8]) || 0), 0),
     muscles: muscles, prs: prs, kcal: kcal, prot: prot, dietDays: D.length, steps: steps, sleep: sleep, sleepQ: sleepQ, dailyDays: DL.length,
+    cardio: cardioRows_(ss).filter(c => inW(c.date)),
     lastMeas: M.length ? M[M.length - 1] : null, firstMeas: M.length ? M[0] : null, coach: coach, coachRow: coachRow };
 }
 
@@ -737,6 +845,13 @@ function reportHtml_(st, sheetUrl) {
   if (st.trainings.length) h += '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#fff;border:1px solid ' + LINE + '">'
     + st.trainings.map(t => '<tr><td style="' + font + 'padding:9px 12px;border-bottom:1px solid ' + LINE + ';font-weight:700;color:' + NAVY + '">' + esc_(t.day) + '</td><td style="' + font + 'padding:9px 12px;border-bottom:1px solid ' + LINE + ';color:' + MUTED + '">' + Utilities.formatDate(toDate_(t.date), TZ, 'EEE d.MM') + '</td><td style="' + font + 'padding:9px 12px;border-bottom:1px solid ' + LINE + ';text-align:right;color:#1D1D1D">' + t.sets + ' serii · ' + t.min + ' min</td></tr>').join('') + '</table>';
   else h += '<div style="' + font + 'color:' + MUTED + ';background:#fff;border:1px dashed ' + LINE + ';padding:12px">Brak zapisanych treningów w tym tygodniu.</div>';
+  // cardio
+  if (st.cardio && st.cardio.length) {
+    const km = st.cardio.reduce((a, c) => a + (Number(c.km) || 0), 0), mn = st.cardio.reduce((a, c) => a + (Number(c.min) || 0), 0);
+    h += h3('Cardio · ' + st.cardio.length + ' ' + (st.cardio.length === 1 ? 'sesja' : 'sesje') + (km ? ' · ' + f1_(km) + ' km' : '') + ' · ' + Math.round(mn) + ' min')
+      + '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#fff;border:1px solid ' + LINE + '">'
+      + st.cardio.map(c => '<tr><td style="' + font + 'padding:9px 12px;border-bottom:1px solid ' + LINE + ';font-weight:700;color:' + NAVY + '">' + esc_(c.type) + '</td><td style="' + font + 'padding:9px 12px;border-bottom:1px solid ' + LINE + ';color:' + MUTED + '">' + Utilities.formatDate(toDate_(c.date), TZ, 'EEE d.MM') + '</td><td style="' + font + 'padding:9px 12px;border-bottom:1px solid ' + LINE + ';text-align:right;color:#1D1D1D">' + (c.km ? f1_(Number(c.km)) + ' km · ' : '') + Math.round(c.min) + ' min</td></tr>').join('') + '</table>';
+  }
   // partie
   const order = ['Klatka', 'Plecy', 'Barki', 'Biceps', 'Triceps', 'Nogi'];
   const maxM = Math.max(1, ...order.map(m => st.muscles[m] || 0));
