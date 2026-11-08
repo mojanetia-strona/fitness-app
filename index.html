@@ -358,7 +358,8 @@ const LIB = [
 ];
 const MGROUPS = ['Klatka','Barki','Triceps','Plecy','Biceps','Nogi','Inne'];
 const CARDIO = ['Rower','Rower stacjonarny','Bieżnia','Bieganie','Orbitrek','Wioślarz','Spacer','Schody','Inne'];
-const IDLE_MIN = 15; // po tylu minutach bez dotknięcia apki trening kończy się sam
+const IDLE_MIN = 15;
+const SLEEP_ADJ_MIN = 20; // stała korekta snu z telefonu // po tylu minutach bez dotknięcia apki trening kończy się sam
 const GOAL = {start:85, target:90.5, rateLo:0.2, rateHi:0.35};
 const DGOAL = {kcal:3300, p:170};
 const MEAS = [{k:'arm',l:'Ramię'},{k:'forearm',l:'Przedramię'},{k:'chest',l:'Klatka'},{k:'waist',l:'Talia'},{k:'thigh',l:'Udo'},{k:'calf',l:'Łydka'}];
@@ -513,7 +514,8 @@ function tickRest(){
 }
 let wl=null;
 async function wake(on){ try{ if(on && navigator.wakeLock){ wl=await navigator.wakeLock.request('screen'); } else if(!on && wl){ await wl.release(); wl=null; } }catch(e){} }
-document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible'){ checkIdle(); if(S.active) wake(true); sync(); } });
+function morningPull(){ const h=new Date().getHours(); const dd=S.diet.daily[today()]; if(h>=4&&h<14&&!(dd&&dd.wake)&&!(S.diet.fetched&&Date.now()-S.diet.fetched<60000)) fetchDiet(true); }
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible'){ morningPull(); checkIdle(); if(S.active) wake(true); sync(); } });
 
 
 /* ============ charts ============ */
@@ -723,8 +725,9 @@ async function labScan(){
 }
 /* noc z telefonu: odłożenie na ładowarkę wieczorem i zdjęcie rano (z arkusza) */
 function phoneNight(d){ const x=S.diet.daily[d]; if(!x||!x.bed||!x.wake) return null;
-  const t=s=>new Date(s.replace(' ','T')).getTime(); const h=(t(x.wake)-t(x.bed))/36e5; if(!(h>0&&h<16)) return null;
-  return {h:Math.round(h*10)/10, bedT:x.bed.slice(11,16), wakeT:x.wake.slice(11,16)}; }
+  const t=s=>new Date(s.replace(' ','T')).getTime(); const raw=(t(x.wake)-t(x.bed))/36e5; if(!(raw>0&&raw<16)) return null;
+  const h=Math.max(0,raw-SLEEP_ADJ_MIN/60); // 15 min na zaśnięcie + 5 min od pobudki do wzięcia telefonu
+  return {h:Math.round(h*10)/10, raw:Math.round(raw*10)/10, bedT:x.bed.slice(11,16), wakeT:x.wake.slice(11,16)}; }
 function lastSleep(){ const ks=Object.keys(S.sleep).sort(); return ks.length?S.sleep[ks[ks.length-1]]:null; }
 function qOf(d){ return S.sleepQ&&S.sleepQ[d]!=null?S.sleepQ[d]:(S.diet.daily[d]&&S.diet.daily[d].q!=null&&S.diet.daily[d].q!==''?S.diet.daily[d].q:null); }
 let sleepStar=null, sleepStarDate=null;
@@ -736,7 +739,7 @@ function sleepPanel(){
   const stars=[1,2,3,4,5].map(n=>`<button class="star${q!=null&&n<=q?' on':''}" data-a="sstar" data-v="${n}" aria-label="${n} na 5">★</button>`).join('');
   const recent=days.filter(x=>sleepOf(x)!=null||qOf(x)!=null).slice(0,7);
   const ph=phoneNight(d); const confirmed=S.sleep[d]!=null;
-  const phTxt=ph?`<div class="phn"><span>📱 Telefon odłożony <b>${ph.bedT}</b>, zdjęty <b>${ph.wakeT}</b> · ${fN(ph.h)} h w łóżku${confirmed?'':' · <b>zatwierdź</b>'}</span>
+  const phTxt=ph?`<div class="phn"><span>📱 Telefon odłożony <b>${ph.bedT}</b>, zdjęty <b>${ph.wakeT}</b> · ${fN(ph.raw)} h w łóżku, po odjęciu 20 min na zaśnięcie i pobudkę: <b>${fN(ph.h)} h</b>${confirmed?'':' · zatwierdź'}</span>
       <div class="chips" style="margin-top:6px"><button class="chip" data-a="sread" data-v="0">Od razu spałem</button><button class="chip" data-a="sread" data-v="0.5">Czytałem ok. 30 min</button><button class="chip" data-a="sread" data-v="1">Czytałem ok. 1 h</button></div></div>`:'';
   return `<h3>Sen</h3><div class="panel"><p class="note" style="margin-top:0">${ph?'Godziny wziąłem z telefonu. Popraw, jeśli przed snem czytałeś, i daj gwiazdki.':'Rano wpisz, ile spałeś ostatniej nocy i jak się wyspałeś.'}</p>
     <div class="grid2"><div class="field"><label class="label" for="sdate">Dzień (rano po nocy)</label><input type="date" id="sdate" value="${d}" data-sdate="1"></div><div></div></div>
@@ -1180,7 +1183,7 @@ function seedDemo(){
 const IS_REAL = /github\.io$|localhost$|127\.0\.0\.1$/.test(location.hostname);
 S = load();
 if(!S){ S = IS_REAL ? fresh() : seedDemo(); save(); }
-checkIdle();
+checkIdle(); morningPull();
 if(S.active && S.view!=='workout' && S.view!=='settings') S.view='workout';
 try{ const m=location.hash.match(/^#zd=(.+)$/); if(m){ const c=parseCode(m[1]); if(c){ S.settings.url=c.url; S.settings.token=c.token; save(); } history.replaceState(null,'',location.pathname); } }catch(e){}
 applyGoals(); render(); sync(); fetchDiet();
