@@ -730,27 +730,27 @@ function phoneNight(d){ const x=S.diet.daily[d]; if(!x||!x.bed||!x.wake) return 
   return {h:Math.round(h*10)/10, raw:Math.round(raw*10)/10, bedT:x.bed.slice(11,16), wakeT:x.wake.slice(11,16)}; }
 function lastSleep(){ const ks=Object.keys(S.sleep).sort(); return ks.length?S.sleep[ks[ks.length-1]]:null; }
 function qOf(d){ return S.sleepQ&&S.sleepQ[d]!=null?S.sleepQ[d]:(S.diet.daily[d]&&S.diet.daily[d].q!=null&&S.diet.daily[d].q!==''?S.diet.daily[d].q:null); }
-let sleepStar=null, sleepStarDate=null;
+let sleepStarDate=null;
 function sleepPanel(){
-  const t=today(); const d=sleepStarDate||t; const cur=sleepOf(d); const q=sleepStar!=null?sleepStar:qOf(d);
+  const t=today(); const d=sleepStarDate||t; const cur=sleepOf(d);
   const days=[...Array(7)].map((_,i)=>addDays(t,-i));
   const a=x=>x.length?x.reduce((p,v)=>p+ +v,0)/x.length:null;
-  const as=a(days.map(sleepOf).filter(x=>x!=null&&x!=='')), aq=a(days.map(qOf).filter(x=>x!=null&&x!=='')), at=a(days.map(x=>S.diet.daily[x]&&S.diet.daily[x].steps).filter(x=>x!=null&&x!==''));
-  const stars=[1,2,3,4,5].map(n=>`<button class="star${q!=null&&n<=q?' on':''}" data-a="sstar" data-v="${n}" aria-label="${n} na 5">★</button>`).join('');
-  const recent=days.filter(x=>sleepOf(x)!=null||qOf(x)!=null).slice(0,7);
+  const wk=days.map(phoneNight).filter(Boolean).map(p=>{const [h,m]=p.wakeT.split(':').map(Number); return h*60+m;});
+  const aw=wk.length?Math.round(wk.reduce((p,v)=>p+v,0)/wk.length):null;
+  const as=a(days.map(sleepOf).filter(x=>x!=null&&x!=='')), at=a(days.map(x=>S.diet.daily[x]&&S.diet.daily[x].steps).filter(x=>x!=null&&x!==''));
+  const recent=days.filter(x=>sleepOf(x)!=null).slice(0,7);
   const ph=phoneNight(d); const confirmed=S.sleep[d]!=null;
-  const phTxt=ph?`<div class="phn"><span>📱 Telefon odłożony <b>${ph.bedT}</b>, zdjęty <b>${ph.wakeT}</b> · ${fN(ph.raw)} h w łóżku, po odjęciu 20 min na zaśnięcie i pobudkę: <b>${fN(ph.h)} h</b>${confirmed?'':' · zatwierdź'}</span>
+  const phTxt=ph?`<div class="phn"><span>📱 Telefon odłożony <b>${ph.bedT}</b>, zdjęty <b>${ph.wakeT}</b> · ${fN(ph.raw)} h w łóżku, po odjęciu 20 min na zaśnięcie i pobudkę: <b>${fN(ph.h)} h</b></span>
       <div class="chips" style="margin-top:6px"><button class="chip" data-a="sread" data-v="0">Od razu spałem</button><button class="chip" data-a="sread" data-v="0.5">Czytałem ok. 30 min</button><button class="chip" data-a="sread" data-v="1">Czytałem ok. 1 h</button></div></div>`:'';
-  return `<h3>Sen</h3><div class="panel"><p class="note" style="margin-top:0">${ph?'Godziny wziąłem z telefonu. Popraw, jeśli przed snem czytałeś, i daj gwiazdki.':'Rano wpisz, ile spałeś ostatniej nocy i jak się wyspałeś.'}</p>
+  return `<h3>Sen</h3><div class="panel"><p class="note" style="margin-top:0">${ph?'Sen zapisuje się sam z telefonu. Jeśli przed snem czytałeś, stuknij przycisk niżej, zapisze się od razu.':'Sen zapisuje się sam, gdy telefon leży w nocy na ładowarce. Bez tego możesz wpisać go tutaj.'}</p>
     <div class="grid2"><div class="field"><label class="label" for="sdate">Dzień (rano po nocy)</label><input type="date" id="sdate" value="${d}" data-sdate="1"></div><div></div></div>
     <div class="row mt" style="flex-wrap:nowrap"><button class="step" data-a="sstep" data-v="-0.5" aria-label="Minus pół godziny">−</button><input id="wsleep" inputmode="decimal" value="${cur!=null?fN(cur):''}" placeholder="${fN(lastSleep()??8)}" aria-label="Sen w godzinach" style="flex:1;min-width:0;height:60px;border:1px solid var(--line);text-align:center;font:700 30px var(--f-body);color:var(--navy)"><button class="step" data-a="sstep" data-v="0.5" aria-label="Plus pół godziny">+</button></div>
     ${phTxt}
-    <p class="label mt" style="margin-bottom:4px">Jak się wyspałeś?</p><div class="stars">${stars}</div>
-    <button class="btn primary block mt" data-a="saveSleep">Zapisz sen</button></div>
+    <button class="btn ${ph?'ghost':'primary'} block mt" data-a="saveSleep">Zapisz sen</button></div>
   <div class="strip mt"><div><div class="label">Sen śr. 7 dni</div><div class="v">${as==null?'–':fN(as)}<small>h</small></div></div>
-    <div><div class="label">Ocena śr.</div><div class="v">${aq==null?'–':fN(aq)}<small>/ 5</small></div></div>
+    <div><div class="label">Wstajesz śr.</div><div class="v" style="font-size:22px">${aw==null?'–':Math.floor(aw/60)+':'+String(aw%60).padStart(2,'0')}</div></div>
     <div><div class="label">Kroki śr.</div><div class="v" style="font-size:22px">${at==null?'–':Math.round(at).toLocaleString('pl-PL')}</div></div></div>
-  ${recent.length?`<div class="panel list mt">${recent.map(x=>`<div class="li"><span class="d">${fD(x)}</span><span class="v">${sleepOf(x)!=null?fN(sleepOf(x))+' h':'–'}</span><span class="note" style="color:#E8A317;letter-spacing:1px">${qOf(x)!=null?'★'.repeat(qOf(x))+'<span style="color:var(--line)">'+'★'.repeat(5-qOf(x))+'</span>':''}</span></div>`).join('')}</div>`:''}`;
+  ${recent.length?`<div class="panel list mt">${recent.map(x=>`<div class="li"><span class="d">${fD(x)}</span><span class="v">${sleepOf(x)!=null?fN(sleepOf(x))+' h':'–'}</span></div>`).join('')}</div>`:''}`;
 }
 V.measure = () => S.measTab==='badania' ? labsView() : V.measureObw();
 V.measureObw = () => {
@@ -989,7 +989,7 @@ V.settings = () => {
   <p class="note">„Pobierz z arkusza” przywraca historię, np. na nowym telefonie. Kopia zapasowa kopiuje wszystkie dane jako tekst.</p>
   <div class="field mt"><label class="label" for="restore">Wklej kopię zapasową</label><textarea id="restore" placeholder='{"workouts":[…]}'></textarea></div>
   <button class="btn mt" data-a="restore" data-confirm="1">Wczytaj kopię</button></div>
-  <p class="note mt">Wersja 1.10 · plan: Push A, Pull A, Push B, Pull B, Nogi</p>`;
+  <p class="note mt">Wersja 1.11 · plan: Push A, Pull A, Push B, Pull B, Nogi</p>`;
 };
 
 /* ============ render ============ */
@@ -1044,15 +1044,11 @@ const A = {
     if(!kg||kg<30||kg>250) return flash($('#wkg'));
     S.weights=S.weights.filter(w=>w.date!==date); S.weights.push({date,kg}); enqueue('weight',{date,kg},'wt:'+date);
     render(); toast('Zapisano wagę: '+fN(kg)+' kg'); },
-  saveSleep(){ const date=$('#sdate').value||today(); const sl=num($('#wsleep').value); const q=sleepStar!=null?sleepStar:qOf(date);
-    if(sl==null && q==null) return flash($('#wsleep'));
-    if(sl!=null && (sl<=0||sl>16)) return flash($('#wsleep'));
-    if(sl!=null) S.sleep[date]=sl; S.sleepQ=S.sleepQ||{}; if(q!=null) S.sleepQ[date]=q;
-    enqueue('daily',{date, sleep:sl!=null?sl:sleepOf(date), q},'sl:'+date);
-    sleepStar=null; sleepStarDate=null; render(); toast('Zapisano sen'+(sl!=null?': '+fN(sl)+' h':'')+(q!=null?' · '+q+'/5':'')); },
-  sstar(b){ const v=+b.dataset.v; sleepStar=(sleepStar===v?null:v); sleepStarDate=$('#sdate').value||today(); const sl=$('#wsleep').value; render(); const el=$('#wsleep'); if(el) el.value=sl; },
-  sread(b){ const d=$('#sdate').value||today(); const ph=phoneNight(d); if(!ph) return; const el=$('#wsleep'); el.value=fN(Math.max(0,Math.round((ph.h-parseFloat(b.dataset.v))*10)/10));
-    document.querySelectorAll('[data-a=sread]').forEach(c=>c.classList.toggle('on',c===b)); },
+  saveSleep(){ const date=$('#sdate').value||today(); const sl=num($('#wsleep').value);
+    if(sl==null || sl<=0 || sl>16) return flash($('#wsleep'));
+    S.sleep[date]=sl; enqueue('daily',{date, sleep:sl},'sl:'+date);
+    sleepStarDate=null; render(); toast('Zapisano sen: '+fN(sl)+' h'); },
+  sread(b){ const d=$('#sdate').value||today(); const ph=phoneNight(d); if(!ph) return; const el=$('#wsleep'); el.value=fN(Math.max(0,Math.round((ph.h-parseFloat(b.dataset.v))*10)/10)); A.saveSleep(); },
   sstep(b){ const el=$('#wsleep'); const v=(num(el.value)??(lastSleep()??8))+parseFloat(b.dataset.v); el.value=fN(Math.max(0,Math.min(16,v))); },
   delWeight(b){ const d=b.dataset.v; S.weights=S.weights.filter(w=>w.date!==d); enqueue('delWeight',{date:d},'wt:'+d); render(); },
   saveMeasure(){ const date=$('#mdate').value||today(); const m={date}; let any=false;
@@ -1149,7 +1145,7 @@ document.addEventListener('input',e=>{
   if(S.active) S.active.last=Date.now();
   const t=e.target; if(t.dataset.calc){ calcDraft(); return; } if(t.dataset.aig!=null){ aiRescale(+t.dataset.aig, t.value); return; } if(t.id==='aitext'&&aiDraft){ aiDraft.text=t.value; return; } if(t.id==='fname'&&draft){ draft.name=t.value; return; } if(t.dataset.in && S.active){ const s=S.active.ex[+t.dataset.i].sets[+t.dataset.j]; if(t.dataset.in==='kg') s.kg=t.value.replace(',','.'); else s.reps=num(t.value)||''; save(); }
 });
-document.addEventListener('change',e=>{ if(e.target.dataset.sdate){ sleepStarDate=e.target.value; sleepStar=null; render(); return; } if(e.target.id==='scanfile'){ scanPhoto(e.target.files&&e.target.files[0]); return; } if(e.target.dataset.sel==='prog'){ S.progEx=e.target.value; save(); render(); } });
+document.addEventListener('change',e=>{ if(e.target.dataset.sdate){ sleepStarDate=e.target.value; render(); return; } if(e.target.id==='scanfile'){ scanPhoto(e.target.files&&e.target.files[0]); return; } if(e.target.dataset.sel==='prog'){ S.progEx=e.target.value; save(); render(); } });
 document.addEventListener('focusin',e=>{ if(e.target.matches('.sets input')) setTimeout(()=>e.target.select(),0); });
 
 /* ============ demo (tylko w podglądzie) ============ */

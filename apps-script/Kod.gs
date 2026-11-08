@@ -866,7 +866,7 @@ function reportHtml_(st, sheetUrl) {
     + tile('Treningi', st.trainings.length + ' / 5', st.sets + ' serii · ' + f1_(st.vol / 1000) + ' t') + '</tr><tr>'
     + tile('Kalorie śr.', st.kcal === null ? '–' : Math.round(st.kcal), 'cel 3300 · ' + st.dietDays + ' dni')
     + tile('Białko śr.', st.prot === null ? '–' : Math.round(st.prot) + ' g', 'cel 170 g', st.prot !== null && st.prot < 170 ? PINK : NAVY)
-    + tile('Kroki · sen', st.steps === null ? '–' : Math.round(st.steps).toLocaleString('pl-PL'), 'sen śr. ' + (st.sleep === null ? '–' : f1_(st.sleep) + ' h') + (st.sleepQ === null ? '' : ' · ocena ' + f1_(st.sleepQ) + '/5')) + '</tr></table>';
+    + tile('Kroki · sen', st.steps === null ? '–' : Math.round(st.steps).toLocaleString('pl-PL'), 'sen śr. ' + (st.sleep === null ? '–' : f1_(st.sleep) + ' h')) + '</tr></table>';
   // komentarz trenera
   if (st.coach && st.coach.text) {
     h += h3('Komentarz trenera') + '<div style="background:#fff;border:1px solid ' + LINE + ';border-left:4px solid ' + BLUE + ';padding:14px 16px">'
