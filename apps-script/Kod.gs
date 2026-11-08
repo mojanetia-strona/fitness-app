@@ -337,6 +337,7 @@ function doGet(e) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   if (p.action === 'pull') return json_(Object.assign({ ok: true }, pullAll_(ss), dietRange_(ss, '', '')));
   if (p.action === 'daily') return json_(dailyFromShortcut_(ss, p));
+  if (p.action === 'phone') return json_(phoneEvent_(ss, p.e));
   if (p.action === 'ean') return json_(eanLookup_(ss, p.code)); // test z przeglądarki
   if (p.action === 'diet') return json_(Object.assign({ ok: true }, dietRange_(ss, p.from || '', p.to || '')));
   return json_({ ok: true, name: ss.getName() });
@@ -518,8 +519,10 @@ function dietRange_(ss, from, to) {
   const foods = fd && fd.getLastRow() > 1 ? fd.getRange(2, 1, fd.getLastRow() - 1, 11).getValues().filter(r => r[0] && inR(key_(r[1])))
     .map(r => ({ id: String(r[0]), date: key_(r[1]), time: r[2] instanceof Date ? r[2].getTime() : null, source: r[3], name: r[4], amount: r[5], kcal: Number(r[6]) || 0, p: Number(r[7]) || 0, c: Number(r[8]) || 0, f: Number(r[9]) || 0, ean: String(r[10] || '') })) : [];
   const dl = ss.getSheetByName(SH.DAILY);
-  const daily = dl && dl.getLastRow() > 1 ? dl.getRange(2, 1, dl.getLastRow() - 1, 5).getValues().filter(r => r[0] && inR(key_(r[0])))
-    .map(r => ({ date: key_(r[0]), steps: r[1] === '' ? null : Number(r[1]), sleep: r[2] === '' ? null : Number(r[2]), q: r[4] === '' ? null : Number(r[4]) })) : [];
+  const dc = dl ? Math.min(7, dl.getMaxColumns()) : 5;
+  const daily = dl && dl.getLastRow() > 1 ? dl.getRange(2, 1, dl.getLastRow() - 1, dc).getValues().filter(r => r[0] && inR(key_(r[0])))
+    .map(r => ({ date: key_(r[0]), steps: r[1] === '' ? null : Number(r[1]), sleep: r[2] === '' ? null : Number(r[2]), src: r[3] || '', q: r[4] === '' || r[4] == null ? null : Number(r[4]),
+      bed: r[5] instanceof Date ? Utilities.formatDate(r[5], TZ, 'yyyy-MM-dd HH:mm') : '', wake: r[6] instanceof Date ? Utilities.formatDate(r[6], TZ, 'yyyy-MM-dd HH:mm') : '' })) : [];
   const wt = ss.getSheetByName(SH.WEIGHT);
   const weights = wt && wt.getLastRow() > 1 ? wt.getRange(2, 1, wt.getLastRow() - 1, 2).getValues().filter(r => r[0] && r[1] !== '' && inR(key_(r[0])))
     .map(r => ({ date: key_(r[0]), kg: Number(r[1]) })) : [];
@@ -684,6 +687,38 @@ function aiEan_(code, hint) {
 // Test z edytora: wybierz testEan i kliknij Uruchom, wynik w Dzienniku wykonania.
 function testEan() { Logger.log(JSON.stringify(eanLookup_(SpreadsheetApp.getActiveSpreadsheet(), '5900617041685'))); }
 
+/* ================= SEN Z TELEFONU ================= */
+// Skróty iOS: ?action=phone&token=…&e=down (telefon odłożony na ładowarkę) / e=up (zdjęty z ładowarki).
+// Noc dnia D: ostatnie odłożenie między D-1 18:00 a D 04:00 i pierwsze zdjęcie po nim między D 04:00 a D 13:00.
+function phoneEvent_(ss, e) {
+  e = String(e || '').toLowerCase(); if (e !== 'down' && e !== 'up') return { ok: false, error: 'e=down albo e=up' };
+  const log = ss.getSheetByName('Telefon') || (function () { const s = ss.insertSheet('Telefon'); s.appendRow(['Czas', 'Zdarzenie']); s.setFrozenRows(1); s.getRange('A:A').setNumberFormat('d mmm yyyy HH:mm'); return s; })();
+  const now = new Date(); log.appendRow([now, e === 'down' ? 'odłożony' : 'zdjęty']);
+  const hr = Number(Utilities.formatDate(now, TZ, 'H'));
+  if (e === 'up' && hr >= 4 && hr < 13) return Object.assign({ ok: true }, phoneNight_(ss, Utilities.formatDate(now, TZ, 'yyyy-MM-dd')));
+  return { ok: true };
+}
+function phoneNight_(ss, date) {
+  const dl = ss.getSheetByName(SH.DAILY);
+  if (dl.getMaxColumns() < 7) dl.insertColumnsAfter(dl.getMaxColumns(), 7 - dl.getMaxColumns());
+  if (dl.getRange(1, 6).getValue() === '') dl.getRange(1, 6, 1, 2).setValues([['Telefon odłożony', 'Telefon zdjęty']]).setFontWeight('bold');
+  // nie nadpisuj, jeśli ta noc już ma godzinę wstania
+  const n = dl.getLastRow() - 1;
+  if (n > 0) { const v = dl.getRange(2, 1, n, 7).getValues(); for (let i = 0; i < n; i++) if (key_(v[i][0]) === date && v[i][6] instanceof Date) return { date: date, kept: true }; }
+  const d0 = toDate_(date), t = (h) => d0.getTime() + h * 36e5;
+  const ev = rows_(ss, 'Telefon', 2).filter(r => r[0] instanceof Date).map(r => ({ t: r[0].getTime(), e: r[1] }));
+  const downs = ev.filter(x => x.e === 'odłożony' && x.t >= t(-6) && x.t < t(4));
+  if (!downs.length) return { date: date, bed: null };
+  const bed = downs[downs.length - 1].t;
+  const up = ev.filter(x => x.e === 'zdjęty' && x.t > bed && x.t >= t(4) && x.t < t(13))[0];
+  if (!up) return { date: date, bed: new Date(bed) };
+  const hours = Math.round((up.t - bed) / 36e5 * 10) / 10;
+  upsertDaily_(ss, date, { sleep: hours }, 'telefon');
+  const v2 = dl.getRange(2, 1, dl.getLastRow() - 1, 1).getValues();
+  for (let i = 0; i < v2.length; i++) if (key_(v2[i][0]) === date) { dl.getRange(i + 2, 6, 1, 2).setValues([[new Date(bed), new Date(up.t)]]).setNumberFormat('HH:mm'); break; }
+  return { date: date, hours: hours };
+}
+
 /* ================= KROKI I SEN ================= */
 // Skróty iOS: ?action=daily&token=…&steps=…&sleep=…&kg=…  (każdy parametr opcjonalny)
 // sleep: godziny (7,5), „7 h 30 min”, albo sleep_min (minuty) / sleep_s (sekundy)
@@ -725,14 +760,14 @@ function upsertDaily_(ss, date, d, src) {
     const vals = sh.getRange(2, 1, n, 4).getValues();
     for (let i = 0; i < n; i++) if (key_(vals[i][0]) === date) {
       if (steps !== null) sh.getRange(i + 2, 2).setValue(Math.round(steps));
-      const manualKept = src === 'auto' && vals[i][3] === 'ręcznie' && vals[i][2] !== '';
+      const manualKept = src !== 'ręcznie' && vals[i][3] === 'ręcznie' && vals[i][2] !== '';
       if (sleep !== null && !manualKept) sh.getRange(i + 2, 3, 1, 2).setValues([[sleep, src]]);
       if (q !== null) sh.getRange(i + 2, 5).setValue(q);
       return;
     }
   }
   sh.appendRow([toDate_(date), steps === null ? '' : Math.round(steps), sleep === null ? '' : sleep, sleep === null ? '' : src, q === null ? '' : q]);
-  if (sh.getLastRow() > 2) sh.getRange(2, 1, sh.getLastRow() - 1, 5).sort({ column: 1, ascending: true });
+  if (sh.getLastRow() > 2) sh.getRange(2, 1, sh.getLastRow() - 1, Math.max(5, sh.getLastColumn())).sort({ column: 1, ascending: true });
 }
 
 /* ================= RAPORT TYGODNIOWY ================= */
