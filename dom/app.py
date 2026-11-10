@@ -10,7 +10,7 @@ try:
 except ImportError:
     import urequests as requests
 
-VERSION = '1.0.10'
+VERSION = '1.0.11'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -32,7 +32,7 @@ PLAN = {
     'rh_target': 50,        # cel stałej wilgotności w salonie
     'air_co2_drop': 100,    # wietrzenie: spadek CO2 w 3 min (ppm)
     'air_t_drop': 0.6,      # wietrzenie: spadek temperatury w 3 min (°C)
-    'air_max_min': 30,      # wietrzenie: najdłużej tyle minut pauzy
+    'air_max_min': 20,      # wietrzenie: najdłużej tyle minut pauzy
     'ext_temp': True,       # salon: temperatura z Qingpinga do głowicy
     'scale_min': 45.0, 'scale_max': 150.0,
 }
@@ -425,21 +425,27 @@ def tick_rules(sync, q):
     # --- bezpiecznik wietrzenia ---
     if co2 is not None and t is not None:
         hist.append((time.time(), co2, t))
-        while hist and time.time() - hist[0][0] > 400:
-            hist.pop(0)
-        old = [h for h in hist if 150 <= time.time() - h[0] <= 260]
-        if old:
-            o = old[0]
-            dco2 = co2 - o[1]
-            dt = t - o[2]
-            if not state.get('airing'):
-                if dco2 <= -PLAN['air_co2_drop'] or dt <= -PLAN['air_t_drop']:
-                    start_airing(dco2, dt)
-            else:
-                calm = dco2 > -30 and dt > -0.2
-                long = time.time() - state['airing_at'] > PLAN['air_max_min'] * 60
-                if (calm and time.time() - state['airing_at'] > 300) or long:
-                    stop_airing('koniec' if calm else 'limit czasu')
+    while hist and time.time() - hist[0][0] > 400:
+        hist.pop(0)
+    if state.get('airing'):
+        el = time.time() - state['airing_at']
+        if el > PLAN['air_max_min'] * 60:
+            stop_airing('limit czasu')  # działa też, gdy Qingping chwilowo nie odpowiada
+        elif co2 is not None and t is not None and el > 180:
+            ref = [h for h in hist if 100 <= time.time() - h[0] <= 260]
+            if ref:
+                d_co2 = co2 - ref[0][1]
+                d_t = t - ref[0][2]
+                # okno zamknięte: CO2 znowu rośnie albo temperatura wraca / przestała spadać
+                if d_co2 >= 0 or d_t >= 0.1 or (d_co2 > -30 and d_t > -0.2):
+                    stop_airing('koniec (CO2 %+d, T %+.1f)' % (d_co2, d_t))
+    elif co2 is not None and t is not None:
+        ref = [h for h in hist if 100 <= time.time() - h[0] <= 260]
+        if ref:
+            d_co2 = co2 - ref[0][1]
+            d_t = t - ref[0][2]
+            if d_co2 <= -PLAN['air_co2_drop'] or d_t <= -PLAN['air_t_drop']:
+                start_airing(d_co2, d_t)
 
     # --- temperatura z Qingpinga do głowicy w salonie (co 5 min) ---
     if PLAN['ext_temp'] and t is not None and time.time() - state.get('ext_at', 0) > 300:
@@ -454,6 +460,11 @@ def start_airing(dco2, dt):
     state['airing'] = {'hum': bool(hum_on), 'pur': bool(pur_on), 'bed': bool(bed_on),
                        'trv': state.get('trv_salon'), 'trv_bed': state.get('trv_bed')}
     state['airing_at'] = time.time()
+    try:
+        with open('airing.json', 'w') as f:
+            json.dump(state['airing'], f)
+    except Exception:
+        pass
     log('wietrzenie start (CO2 %+d, T %+.1f)' % (dco2, dt))
     if hum_on:
         dev_set('salon_hum', 'on', False)
@@ -469,6 +480,11 @@ def start_airing(dco2, dt):
 def stop_airing(why):
     a = state.get('airing') or {}
     state['airing'] = None
+    try:
+        import os
+        os.remove('airing.json')
+    except Exception:
+        pass
     log('wietrzenie %s' % why)
     # przywróć tylko to, co chodziło przed wietrzeniem
     if a.get('hum'):
@@ -509,6 +525,12 @@ def setup():
         if d and d.get('ip') and d.get('token') and len(d['token']) == 32:
             dev[name] = Device(d['ip'], d['token'], name)
     log('start v%s, urzadzenia: %s' % (VERSION, ','.join(sorted(dev.keys()))))
+    try:
+        with open('airing.json') as f:
+            state['airing'] = json.load(f)
+        stop_airing('przerwane restartem, przywracam')
+    except OSError:
+        pass
 
 
 def run():
