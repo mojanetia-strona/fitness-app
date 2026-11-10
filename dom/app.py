@@ -10,7 +10,7 @@ try:
 except ImportError:
     import urequests as requests
 
-VERSION = '1.0.5'
+VERSION = '1.0.6'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -18,10 +18,10 @@ PLAN = {
     'salon_night': 18.0,    # salon w nocy (po odłożeniu telefonu)
     'bed_day': 4.0,         # sypialnia w dzień (4 = praktycznie wyłączona)
     'bed_night': 4.0,       # sypialnia w nocy
-    'bed_morning': 20.0,    # sypialnia przed pobudką
+    'bed_morning': 22.0,    # sypialnia przed pobudką
     'bed_pre_min': 30,      # ile minut przed pobudką grzać sypialnię
     'bed_after_min': 30,    # ile minut po zdjęciu telefonu wyłączyć sypialnię
-    'salon_pre_min': 90,    # ile minut przed pobudką włączyć salon (nawilżacz, oczyszczacz)
+    'salon_pre_min': 60,    # ile minut przed pobudką włączyć salon (nawilżacz, oczyszczacz)
     'salon_heat_pre_min': 60,  # ile minut przed pobudką grzać salon na dzień
     'wake_wd': 420,         # domyślna pobudka w tygodniu (min od północy), gdy brak danych z telefonu
     'wake_we': 540,         # domyślna pobudka w weekend
@@ -345,7 +345,10 @@ def phone_asleep(ph):
 
 def wake_min(sync, weekend):
     w = (sync or {}).get('wake') or {}
-    v = w.get('we' if weekend else 'wd')
+    # typowa pobudka dla dzisiejszego dnia tygodnia (mediana), potem dni robocze/weekend, potem domyślna
+    v = (w.get('days') or {}).get(str(now_local()[6] + 1))
+    if v is None:
+        v = w.get('we' if weekend else 'wd')
     if v is None:
         v = PLAN['wake_we' if weekend else 'wake_wd']
     return v
@@ -445,26 +448,36 @@ def tick_rules(sync, q):
 def start_airing(dco2, dt):
     hum_on, = dev_get('salon_hum', ['on'])
     pur_on, = dev_get('salon_pur', ['on'])
-    state['airing'] = {'hum': bool(hum_on), 'pur': bool(pur_on), 'trv': state.get('trv_salon')}
+    bed_on, = dev_get('bed_hum', ['on'])
+    state['airing'] = {'hum': bool(hum_on), 'pur': bool(pur_on), 'bed': bool(bed_on),
+                       'trv': state.get('trv_salon'), 'trv_bed': state.get('trv_bed')}
     state['airing_at'] = time.time()
     log('wietrzenie start (CO2 %+d, T %+.1f)' % (dco2, dt))
     if hum_on:
         dev_set('salon_hum', 'on', False)
     if pur_on:
         dev_set('salon_pur', 'on', False)
+    if bed_on:
+        dev_set('bed_hum', 'on', False)
+    # grzejniki przykręcone, żeby nie grzały ulicy przy otwartym oknie
     trv_target('salon', 5)
+    trv_target('bed', 4)
 
 
 def stop_airing(why):
     a = state.get('airing') or {}
     state['airing'] = None
     log('wietrzenie %s' % why)
-    # przywróć tylko to, co chodziło, i tylko jeśli nikt w międzyczasie nie przestawił (np. wyjście z domu)
+    # przywróć tylko to, co chodziło przed wietrzeniem
     if a.get('hum'):
         dev_set('salon_hum', 'on', True)
     if a.get('pur'):
         dev_set('salon_pur', 'on', True)
+    if a.get('bed'):
+        dev_set('bed_hum', 'on', True)
     trv_target('salon', a.get('trv') or PLAN['salon_day'])
+    if a.get('trv_bed'):
+        trv_target('bed', a['trv_bed'])
 
 
 # ---------- start ----------

@@ -738,16 +738,20 @@ function espSync_(ss, p) {
   }
   const ev = rows_(ss, 'Telefon', 2).filter(r => r[0] instanceof Date).map(r => ({ t: r[0].getTime(), e: r[1] === 'odłożony' ? 'down' : 'up' }));
   if (ev.length) { const l = ev[ev.length - 1]; out.phone = { e: l.e, t: Utilities.formatDate(new Date(l.t), TZ, "yyyy-MM-dd'T'HH:mm:ss") }; }
-  const since = Date.now() - 21 * 864e5, firstUp = {};
+  const since = Date.now() - 42 * 864e5, firstUp = {};
   ev.filter(x => x.e === 'up' && x.t >= since).forEach(x => {
     const d = new Date(x.t), h = Number(Utilities.formatDate(d, TZ, 'H')), m = Number(Utilities.formatDate(d, TZ, 'm'));
     if (h < 4 || h >= 13) return;
     const day = Utilities.formatDate(d, TZ, 'yyyy-MM-dd');
-    if (!(day in firstUp)) firstUp[day] = { min: h * 60 + m, we: [6, 7].indexOf(Number(Utilities.formatDate(d, TZ, 'u'))) >= 0 };
+    const dow = Number(Utilities.formatDate(d, TZ, 'u')); // 1 = poniedziałek … 7 = niedziela
+    if (!(day in firstUp)) firstUp[day] = { min: h * 60 + m, dow: dow, we: dow >= 6 };
   });
   const med = a => { if (!a.length) return null; a.sort((x, y) => x - y); return a[Math.floor(a.length / 2)]; };
   const vals = Object.keys(firstUp).map(k => firstUp[k]);
-  out.wake = { wd: med(vals.filter(v => !v.we).map(v => v.min)), we: med(vals.filter(v => v.we).map(v => v.min)) }; // minuty od północy
+  // minuty od północy: osobno dla każdego dnia tygodnia (z 6 tygodni), a zapasowo dni robocze / weekend
+  const days = {};
+  for (let i = 1; i <= 7; i++) { const v = med(vals.filter(x => x.dow === i).map(x => x.min)); if (v !== null) days[i] = v; }
+  out.wake = { wd: med(vals.filter(v => !v.we).map(v => v.min)), we: med(vals.filter(v => v.we).map(v => v.min)), days: days };
   return out;
 }
 
