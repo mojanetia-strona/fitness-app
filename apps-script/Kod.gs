@@ -728,8 +728,11 @@ function espSync_(ss, p) {
   const out = { ok: true, now: Utilities.formatDate(new Date(), TZ, "yyyy-MM-dd'T'HH:mm:ss") };
   const kg = numIn_(p.kg);
   if (kg !== null && kg >= 30 && kg <= 250) {
+    // liczy się pierwsze ważenie dnia (rano); późniejsze tylko logujemy
     const date = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd'), sh = ss.getSheetByName(SH.WEIGHT);
-    upsertByDate_(sh, date, [Math.round(kg * 10) / 10]); rewriteWeightFormulas_(sh); out.kg = Math.round(kg * 10) / 10;
+    const has = sh.getLastRow() > 1 && sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues().some(r => r[0] && key_(r[0]) === date);
+    if (!has) { upsertByDate_(sh, date, [Math.round(kg * 10) / 10]); rewriteWeightFormulas_(sh); out.kg = Math.round(kg * 10) / 10; }
+    else out.kg_skipped = Math.round(kg * 10) / 10;
   }
   if (p.log) {
     const lg = ss.getSheetByName('Dom') || (function () { const s = ss.insertSheet('Dom'); s.appendRow(['Czas', 'Wpis']); s.setFrozenRows(1); s.getRange('A:A').setNumberFormat('d mmm yyyy HH:mm'); return s; })();
