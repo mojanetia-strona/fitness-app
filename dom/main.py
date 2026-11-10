@@ -52,8 +52,13 @@ def update():
         r = requests.get(RAW + 'version.txt')
         remote = r.text.strip() if r.status_code == 200 else ''
         r.close()
-        if not remote or remote == local:
-            return
+        def ver(s):
+            try:
+                return tuple(int(x) for x in s.split('.'))
+            except Exception:
+                return (0,)
+        if not remote or ver(remote) <= ver(local):
+            return  # tylko nowsza wersja (raw GitHub bywa chwilę opóźniony)
         print('aktualizacja', local, '->', remote)
         for f in FILES:
             gc.collect()
