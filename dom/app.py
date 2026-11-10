@@ -10,7 +10,7 @@ try:
 except ImportError:
     import urequests as requests
 
-VERSION = '1.0.20'
+VERSION = '1.0.21'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -183,6 +183,27 @@ def trv_target(name, temp):
         log('grzejnik %s -> %s' % (name, temp))
     except Exception as e:
         log('grzejnik %s blad %s' % (name, e))
+
+
+def trv_brief():
+    # skrót stanu głowic do logu: temperatura głowicy / cel / otwarcie zaworu
+    gw = cfg.get('shelly_gw')
+    out = []
+    for name in ('salon', 'bed'):
+        tid = cfg.get('trv', {}).get(name)
+        if not gw or tid is None:
+            continue
+        try:
+            gc.collect()
+            r = requests.get('http://%s/rpc/BluTrv.GetRemoteStatus?id=%s' % (gw, tid), timeout=10)
+            try:
+                t = r.json()['status']['trv:0']
+            finally:
+                r.close()
+            out.append('%s %.1f/%.1f %d%%' % (name, t['current_C'], t['target_C'], t['pos']))
+        except Exception as e:
+            out.append('%s ?' % name)
+    return ' '.join(out)
 
 
 def trv_ext(name, t):
@@ -591,10 +612,10 @@ def run():
             if log_buf and (time.time() - last_report > 120 or len(log_buf) > 8):
                 last_report = time.time()
                 flush_log()
-            if time.time() - state.get('hb', 0) > 3600:
+            if time.time() - state.get('hb', 0) > 1800:
                 state['hb'] = time.time()
                 q = state.get('q') or [None] * 4
-                flush_log('ok RH %s T %s CO2 %s PM %s mem %d' % (q[0], q[2], q[3], q[1], gc.mem_free()))
+                flush_log('ok RH %s T %s CO2 %s PM %s | %s | mem %d' % (q[0], q[2], q[3], q[1], trv_brief(), gc.mem_free()))
             if time.time() - state.get('upd', time.time() - 600) > 10800:
                 state['upd'] = time.time()
                 check_update()
