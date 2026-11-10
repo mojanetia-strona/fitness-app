@@ -10,7 +10,7 @@ try:
 except ImportError:
     import urequests as requests
 
-VERSION = '1.0.13'
+VERSION = '1.0.14'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -234,7 +234,7 @@ def dev_set(name, key, value, label=None):
 
 
 # ---------- waga (Mi Smart Scale 2, BLE) ----------
-scale = {'last_kg': None, 'last_sent': 0, 'pending': None, 'pending_at': 0}
+scale = {'last_kg': None, 'last_sent': 0, 'pending': None, 'pending_at': 0, 'seen': 0, 'boost': False, 'logged': 0}
 
 
 def ble_irq(event, data):
@@ -251,6 +251,8 @@ def ble_irq(event, data):
             if typ == 0x16 and ln >= 13 and adv[i + 2] == 0x1D and adv[i + 3] == 0x18:
                 p = adv[i + 4:i + 1 + ln]
                 ctrl = p[0]
+                scale['seen'] = time.time()
+                scale['last_raw'] = (ctrl, p[1] | (p[2] << 8))
                 stab = ctrl & 0x20
                 removed = ctrl & 0x80
                 if stab and not removed:
@@ -276,7 +278,7 @@ def ble_on():
     b.active(True)
     b.irq(ble_irq)
     # mały wycinek czasu radia (30 ms co 300 ms), żeby nie zagłuszać Wi-Fi
-    b.gap_scan(0, 300000, 30000, False)
+    b.gap_scan(0, 300000, 30000, True)
     BLE[0] = b
 
 
@@ -293,7 +295,7 @@ def ble_pause():
 def ble_resume():
     if BLE[0]:
         try:
-            BLE[0].gap_scan(0, 300000, 30000, False)
+            BLE[0].gap_scan(0, 300000, 30000, True)
         except Exception as e:
             print('ble resume err', e)
 
@@ -308,6 +310,21 @@ def ble_start():
 
 
 def scale_tick():
+    # waga się obudziła: skanuj ciągle przez minutę, żeby nie przegapić ustabilizowanego wyniku
+    if BLE[0]:
+        if scale['seen'] and time.time() - scale['seen'] < 60:
+            if not scale['boost']:
+                try:
+                    BLE[0].gap_scan(0, 30000, 30000, True)
+                    scale['boost'] = True
+                    if time.time() - scale['logged'] > 300:
+                        scale['logged'] = time.time()
+                        log('waga nadaje %s' % (scale.get('last_raw'),))
+                except Exception:
+                    pass
+        elif scale['boost']:
+            scale['boost'] = False
+            ble_resume()
     kg = scale['pending']
     if kg is None or time.time() - scale['pending_at'] < 3:
         return
