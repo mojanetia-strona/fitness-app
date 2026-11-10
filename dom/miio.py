@@ -5,6 +5,7 @@ try:
 except ImportError:
     import ucryptolib as cryptolib
 import hashlib
+import binascii
 
 def _md5(b):
     return hashlib.md5(b).digest()
@@ -24,7 +25,7 @@ class Device:
     def __init__(self, ip, token_hex, name=''):
         self.ip = ip
         self.name = name
-        self.token = bytes.fromhex(token_hex)
+        self.token = binascii.unhexlify(token_hex)
         self.key = _md5(self.token)
         self.iv = _md5(self.key + self.token)
         self.did = None

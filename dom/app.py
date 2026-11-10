@@ -119,7 +119,7 @@ def flush_log(extra=''):
         txt = (extra + ' | ' + txt) if txt else extra
     try:
         res = gas({'log': txt[:480]})
-        log_buf.clear()
+        del log_buf[:]
         return res
     except Exception as e:
         print('gas log err', e)
