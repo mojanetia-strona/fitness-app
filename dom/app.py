@@ -10,7 +10,7 @@ try:
 except ImportError:
     import urequests as requests
 
-VERSION = '1.0.6'
+VERSION = '1.0.7'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -480,6 +480,22 @@ def stop_airing(why):
         trv_target('bed', a['trv_bed'])
 
 
+def check_update():
+    """Co 3 h: jeśli na GitHubie jest nowsza wersja, restart (main.py ją pobierze)."""
+    try:
+        ble_pause()
+        r = requests.get('https://raw.githubusercontent.com/mojanetia-strona/fitness-app/main/dom/version.txt')
+        remote = r.text.strip()
+        r.close()
+        ble_resume()
+        if tuple(int(x) for x in remote.split('.')) > tuple(int(x) for x in VERSION.split('.')):
+            flush_log('aktualizacja do ' + remote)
+            machine.reset()
+    except Exception as e:
+        ble_resume()
+        print('update check err', e)
+
+
 # ---------- start ----------
 def setup():
     global cfg
@@ -521,6 +537,9 @@ def run():
                 state['hb'] = time.time()
                 q = state.get('q') or [None] * 4
                 flush_log('ok RH %s T %s CO2 %s PM %s mem %d' % (q[0], q[2], q[3], q[1], gc.mem_free()))
+            if time.time() - state.get('upd', time.time() - 600) > 10800:
+                state['upd'] = time.time()
+                check_update()
             if not network.WLAN(network.STA_IF).isconnected():
                 machine.reset()
         except Exception as e:
