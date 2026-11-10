@@ -10,7 +10,7 @@ try:
 except ImportError:
     import urequests as requests
 
-VERSION = '1.0.15'
+VERSION = '1.0.16'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -27,6 +27,7 @@ PLAN = {
     'wake_wd': 420,         # domyślna pobudka w tygodniu (min od północy), gdy brak danych z telefonu
     'wake_we': 540,         # domyślna pobudka w weekend
     'night_from': 1260,     # odłożenie telefonu po 21:00 = noc
+    'night_late': 1350,     # telefon odłożony wcześniej, ale nadal leży o 22:30 = też noc
     'rh_low': 48,           # salon: poniżej tej wilgotności (Qingping) nawilżacz na mocno
     'rh_ok': 50,            # salon: od tej wilgotności nawilżacz wraca do stałej wilgotności
     'rh_target': 50,        # cel stałej wilgotności w salonie
@@ -358,9 +359,12 @@ def phone_asleep(ph):
         return False
     y, mo, d, h, mi = parse_iso(ph['t'])
     m = h * 60 + mi
-    if not (m >= PLAN['night_from'] or m < 240):
-        return False
-    return local_minutes_since(ph['t']) < 14 * 60
+    since = local_minutes_since(ph['t'])
+    if m >= PLAN['night_from'] or m < 240:
+        return since < 14 * 60
+    # odłożony wcześniej wieczorem (od 18:00) i nadal leży o 22:30
+    now = mins()
+    return m >= 1080 and (now >= PLAN['night_late'] or now < 240) and since < 14 * 60
 
 
 def wake_min(sync, weekend):
@@ -430,6 +434,14 @@ def tick_rules(sync, q):
         state['bed_off_at'] = None
         # w tygodniu do 18:00 sypialnia stoi pusta; w weekend jestem w domu
         trv_target('bed', PLAN['bed_home'] if is_weekend() else PLAN['bed_day'])
+
+    # --- Pon-Pt od 18:00: sypialnia 22°C, jeśli jestem w domu (Google Home trzyma wtedy salon włączony) ---
+    if not weekend and 1080 <= m < PLAN['night_from'] and not asleep and not state.get('bed_eve') == day_key():
+        pur_on, = dev_get('salon_pur', ['on'])
+        if pur_on:
+            state['bed_eve'] = day_key()
+            log('wieczor: jestem w domu, sypialnia %s' % PLAN['bed_home'])
+            trv_target('bed', PLAN['bed_home'])
 
     # --- salon: moc nawilżacza według Qingpinga ---
     if rh is not None and not state.get('airing'):
