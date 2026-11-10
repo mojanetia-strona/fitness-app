@@ -10,7 +10,7 @@ try:
 except ImportError:
     import urequests as requests
 
-VERSION = '1.0.14'
+VERSION = '1.0.15'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -293,6 +293,7 @@ def ble_pause():
 
 
 def ble_resume():
+    scale['boost'] = False  # scale_tick w razie potrzeby znowu włączy ciągły skan
     if BLE[0]:
         try:
             BLE[0].gap_scan(0, 300000, 30000, True)
