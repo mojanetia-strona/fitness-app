@@ -10,7 +10,7 @@ try:
 except ImportError:
     import urequests as requests
 
-VERSION = '1.0.0'
+VERSION = '1.0.1'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -104,11 +104,15 @@ def gas(params):
                     enc += '%%%02X' % b
         url += '&' + k + '=' + enc
     gc.collect()
-    r = requests.get(url)
+    ble_pause()
     try:
-        return r.json()
+        r = requests.get(url)
+        try:
+            return r.json()
+        finally:
+            r.close()
     finally:
-        r.close()
+        ble_resume()
 
 
 def flush_log(extra=''):
@@ -261,13 +265,38 @@ def ble_irq(event, data):
         pass
 
 
+BLE = [None]
+
+
+def ble_scan_on():
+    # mały wycinek czasu radia (30 ms co 300 ms), żeby nie zagłuszać Wi-Fi
+    BLE[0].gap_scan(0, 300000, 30000, False)
+
+
+def ble_pause():
+    if BLE[0]:
+        try:
+            BLE[0].gap_scan(None)
+        except Exception:
+            pass
+
+
+def ble_resume():
+    if BLE[0]:
+        try:
+            ble_scan_on()
+        except Exception:
+            pass
+
+
 def ble_start():
     try:
         import bluetooth
         b = bluetooth.BLE()
         b.active(True)
         b.irq(ble_irq)
-        b.gap_scan(0, 60000, 30000, False)
+        BLE[0] = b
+        ble_scan_on()
         log('bluetooth ok')
         return b
     except Exception as e:

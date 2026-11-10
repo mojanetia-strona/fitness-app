@@ -2,7 +2,7 @@
 import time, json, machine, network, gc
 
 RAW = 'https://raw.githubusercontent.com/mojanetia-strona/fitness-app/main/dom/'
-FILES = ('miio.py', 'app.py')
+FILES = ('miio.py', 'app.py', 'main.py')
 
 
 def wifi(cfg):
@@ -14,6 +14,15 @@ def wifi(cfg):
             if w.isconnected():
                 break
             time.sleep(0.5)
+    if w.isconnected():
+        try:
+            network.ipconfig(dns='8.8.8.8')  # DNS routera bywa zawodny dla Google
+        except Exception:
+            try:
+                ip, mask, gw, dns = w.ifconfig()
+                w.ifconfig((ip, mask, gw, '8.8.8.8'))
+            except Exception:
+                pass
     print('wifi', w.isconnected(), w.ifconfig()[0] if w.isconnected() else '')
     return w.isconnected()
 
