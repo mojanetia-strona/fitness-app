@@ -10,7 +10,7 @@ try:
 except ImportError:
     import urequests as requests
 
-VERSION = '1.0.11'
+VERSION = '1.0.12'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -30,6 +30,7 @@ PLAN = {
     'rh_low': 42,           # salon: poniżej tej wilgotności (Qingping) nawilżacz na mocno
     'rh_ok': 48,            # salon: od tej wilgotności nawilżacz wraca do stałej wilgotności
     'rh_target': 50,        # cel stałej wilgotności w salonie
+    'airing': False,        # tryb wietrzenia wyłączony (wróci z czujnikami okien)
     'air_co2_drop': 100,    # wietrzenie: spadek CO2 w 3 min (ppm)
     'air_t_drop': 0.6,      # wietrzenie: spadek temperatury w 3 min (°C)
     'air_max_min': 20,      # wietrzenie: najdłużej tyle minut pauzy
@@ -439,7 +440,7 @@ def tick_rules(sync, q):
                 # okno zamknięte: CO2 znowu rośnie albo temperatura wraca / przestała spadać
                 if d_co2 >= 0 or d_t >= 0.1 or (d_co2 > -30 and d_t > -0.2):
                     stop_airing('koniec (CO2 %+d, T %+.1f)' % (d_co2, d_t))
-    elif co2 is not None and t is not None:
+    elif PLAN['airing'] and co2 is not None and t is not None:
         ref = [h for h in hist if 100 <= time.time() - h[0] <= 260]
         if ref:
             d_co2 = co2 - ref[0][1]
