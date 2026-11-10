@@ -10,7 +10,7 @@ try:
 except ImportError:
     import urequests as requests
 
-VERSION = '1.0.16'
+VERSION = '1.0.17'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -109,7 +109,7 @@ def gas(params):
     gc.collect()
     ble_pause()
     try:
-        r = requests.get(url)
+        r = requests.get(url, timeout=25)
         try:
             return r.json()
         finally:
@@ -158,7 +158,7 @@ def trv_call(trv_id, method, params):
     for i in range(3):
         try:
             gc.collect()
-            r = requests.post('http://%s/rpc' % gw, data=body, headers={'Content-Type': 'application/json'})
+            r = requests.post('http://%s/rpc' % gw, data=body, headers={'Content-Type': 'application/json'}, timeout=10)
             try:
                 j = r.json()
             finally:
@@ -533,7 +533,7 @@ def check_update():
     """Co 3 h: jeśli na GitHubie jest nowsza wersja, restart (main.py ją pobierze)."""
     try:
         ble_pause()
-        r = requests.get('https://raw.githubusercontent.com/mojanetia-strona/fitness-app/main/dom/version.txt')
+        r = requests.get('https://raw.githubusercontent.com/mojanetia-strona/fitness-app/main/dom/version.txt', timeout=20)
         remote = r.text.strip()
         r.close()
         ble_resume()
@@ -571,7 +571,10 @@ def run():
     last_sync = 0
     last_rules = 0
     last_report = time.time()
+    # strażnik: jeśli pętla stanie na dłużej niż 5 min (np. zawieszone połączenie), płytka sama się zrestartuje
+    wdt = machine.WDT(timeout=300000)
     while True:
+        wdt.feed()
         try:
             if time.time() - last_sync >= 120:
                 last_sync = time.time()
