@@ -10,7 +10,7 @@ try:
 except ImportError:
     import urequests as requests
 
-VERSION = '1.0.2'
+VERSION = '1.0.3'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -268,40 +268,42 @@ def ble_irq(event, data):
 BLE = [None]
 
 
-def ble_scan_on():
+def ble_on():
+    import bluetooth
+    b = bluetooth.BLE()
+    b.active(True)
+    b.irq(ble_irq)
     # mały wycinek czasu radia (30 ms co 300 ms), żeby nie zagłuszać Wi-Fi
-    BLE[0].gap_scan(0, 300000, 30000, False)
+    b.gap_scan(0, 300000, 30000, False)
+    BLE[0] = b
 
 
 def ble_pause():
+    # przy HTTPS wyłączamy Bluetooth całkiem: bez tego brakuje pamięci na szyfrowanie
     if BLE[0]:
         try:
             BLE[0].gap_scan(None)
+            BLE[0].active(False)
         except Exception:
             pass
+    gc.collect()
 
 
 def ble_resume():
-    if BLE[0]:
+    if state.get('ble_wanted'):
         try:
-            ble_scan_on()
-        except Exception:
-            pass
+            ble_on()
+        except Exception as e:
+            print('ble resume err', e)
 
 
 def ble_start():
+    state['ble_wanted'] = True
     try:
-        import bluetooth
-        b = bluetooth.BLE()
-        b.active(True)
-        b.irq(ble_irq)
-        BLE[0] = b
-        ble_scan_on()
+        ble_on()
         log('bluetooth ok')
-        return b
     except Exception as e:
         log('bluetooth blad %s' % e)
-        return None
 
 
 def scale_tick():
@@ -488,7 +490,7 @@ def run():
     last_report = time.time()
     while True:
         try:
-            if time.time() - last_sync >= 60:
+            if time.time() - last_sync >= 120:
                 last_sync = time.time()
                 try:
                     sync = gas({})
