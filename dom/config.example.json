@@ -1,0 +1,15 @@
+{
+  "wifi_ssid": "NAZWA_SIECI",
+  "wifi_pass": "",
+  "gas_url": "https://script.google.com/macros/s/AKfycbydu7kmsjdF42QP1GjXf-swr3SIF2sDEdhmVlC9cJhXM59H-X3MFmn4MKnbHiyMLnqy/exec",
+  "gas_token": "",
+  "shelly_gw": "",
+  "trv": {"salon": 200, "bed": 201},
+  "devices": {
+    "qingping":  {"ip": "192.168.100.28", "token": ""},
+    "salon_hum": {"ip": "192.168.100.29", "token": ""},
+    "salon_pur": {"ip": "192.168.100.30", "token": ""},
+    "bed_hum":   {"ip": "192.168.100.10", "token": ""}
+  },
+  "plan": {}
+}

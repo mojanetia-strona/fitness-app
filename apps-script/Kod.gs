@@ -338,6 +338,7 @@ function doGet(e) {
   if (p.action === 'pull') return json_(Object.assign({ ok: true }, pullAll_(ss), dietRange_(ss, '', '')));
   if (p.action === 'daily') return json_(dailyFromShortcut_(ss, p));
   if (p.action === 'phone') return json_(phoneEvent_(ss, p.e));
+  if (p.action === 'esp') return json_(espSync_(ss, p));
   if (p.action === 'ean') return json_(eanLookup_(ss, p.code)); // test z przeglądarki
   if (p.action === 'diet') return json_(Object.assign({ ok: true }, dietRange_(ss, p.from || '', p.to || '')));
   return json_({ ok: true, name: ss.getName() });
@@ -718,6 +719,36 @@ function phoneNight_(ss, date) {
   const v2 = dl.getRange(2, 1, dl.getLastRow() - 1, 1).getValues();
   for (let i = 0; i < v2.length; i++) if (key_(v2[i][0]) === date) { dl.getRange(i + 2, 6, 1, 2).setValues([[new Date(bed), new Date(up.t)]]).setNumberFormat('HH:mm'); break; }
   return { date: date, hours: hours };
+}
+
+/* ================= PŁYTKA ESP32 (automatyka domu) ================= */
+// ?action=esp&token=…[&kg=82.4][&log=tekst]
+// Zwraca ostatnie zdarzenie ładowarki i typową godzinę zdjęcia telefonu (dni robocze / weekend, mediana z 21 dni).
+function espSync_(ss, p) {
+  const out = { ok: true, now: Utilities.formatDate(new Date(), TZ, "yyyy-MM-dd'T'HH:mm:ss") };
+  const kg = numIn_(p.kg);
+  if (kg !== null && kg >= 30 && kg <= 250) {
+    const date = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd'), sh = ss.getSheetByName(SH.WEIGHT);
+    upsertByDate_(sh, date, [Math.round(kg * 10) / 10]); rewriteWeightFormulas_(sh); out.kg = Math.round(kg * 10) / 10;
+  }
+  if (p.log) {
+    const lg = ss.getSheetByName('Dom') || (function () { const s = ss.insertSheet('Dom'); s.appendRow(['Czas', 'Wpis']); s.setFrozenRows(1); s.getRange('A:A').setNumberFormat('d mmm yyyy HH:mm'); return s; })();
+    lg.appendRow([new Date(), String(p.log).slice(0, 500)]);
+    if (lg.getLastRow() > 3000) lg.deleteRows(2, lg.getLastRow() - 3000);
+  }
+  const ev = rows_(ss, 'Telefon', 2).filter(r => r[0] instanceof Date).map(r => ({ t: r[0].getTime(), e: r[1] === 'odłożony' ? 'down' : 'up' }));
+  if (ev.length) { const l = ev[ev.length - 1]; out.phone = { e: l.e, t: Utilities.formatDate(new Date(l.t), TZ, "yyyy-MM-dd'T'HH:mm:ss") }; }
+  const since = Date.now() - 21 * 864e5, firstUp = {};
+  ev.filter(x => x.e === 'up' && x.t >= since).forEach(x => {
+    const d = new Date(x.t), h = Number(Utilities.formatDate(d, TZ, 'H')), m = Number(Utilities.formatDate(d, TZ, 'm'));
+    if (h < 4 || h >= 13) return;
+    const day = Utilities.formatDate(d, TZ, 'yyyy-MM-dd');
+    if (!(day in firstUp)) firstUp[day] = { min: h * 60 + m, we: [6, 7].indexOf(Number(Utilities.formatDate(d, TZ, 'u'))) >= 0 };
+  });
+  const med = a => { if (!a.length) return null; a.sort((x, y) => x - y); return a[Math.floor(a.length / 2)]; };
+  const vals = Object.keys(firstUp).map(k => firstUp[k]);
+  out.wake = { wd: med(vals.filter(v => !v.we).map(v => v.min)), we: med(vals.filter(v => v.we).map(v => v.min)) }; // minuty od północy
+  return out;
 }
 
 /* ================= KROKI I SEN ================= */
