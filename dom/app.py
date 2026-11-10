@@ -10,7 +10,7 @@ try:
 except ImportError:
     import urequests as requests
 
-VERSION = '1.0.3'
+VERSION = '1.0.4'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -279,20 +279,19 @@ def ble_on():
 
 
 def ble_pause():
-    # przy HTTPS wyłączamy Bluetooth całkiem: bez tego brakuje pamięci na szyfrowanie
+    # na czas HTTPS wstrzymujemy skanowanie (Bluetooth zostaje włączony: ponowne włączenie bywa niemożliwe)
     if BLE[0]:
         try:
             BLE[0].gap_scan(None)
-            BLE[0].active(False)
         except Exception:
             pass
     gc.collect()
 
 
 def ble_resume():
-    if state.get('ble_wanted'):
+    if BLE[0]:
         try:
-            ble_on()
+            BLE[0].gap_scan(0, 300000, 30000, False)
         except Exception as e:
             print('ble resume err', e)
 

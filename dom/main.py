@@ -66,8 +66,12 @@ def update():
             if r.status_code != 200:
                 r.close()
                 return
-            with open(f + '.new', 'w') as o:
-                o.write(r.text)
+            with open(f + '.new', 'wb') as o:
+                while True:
+                    b = r.raw.read(1024)  # po kawałku: cały plik naraz nie mieści się w pamięci
+                    if not b:
+                        break
+                    o.write(b)
             r.close()
         import os
         for f in FILES:
@@ -89,6 +93,12 @@ def main():
     if not cfg.get('wifi_pass'):
         print('uzupelnij config.json')
         return
+    # Bluetooth MUSI wystartować przed Wi-Fi i HTTPS, inaczej brakuje mu pamięci
+    try:
+        import bluetooth
+        bluetooth.BLE().active(True)
+    except Exception as e:
+        print('ble init', e)
     if not wifi(cfg):
         time.sleep(30)
         machine.reset()
