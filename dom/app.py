@@ -10,7 +10,7 @@ try:
 except ImportError:
     import urequests as requests
 
-VERSION = '1.0.12'
+VERSION = '1.0.13'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -27,8 +27,8 @@ PLAN = {
     'wake_wd': 420,         # domyślna pobudka w tygodniu (min od północy), gdy brak danych z telefonu
     'wake_we': 540,         # domyślna pobudka w weekend
     'night_from': 1260,     # odłożenie telefonu po 21:00 = noc
-    'rh_low': 42,           # salon: poniżej tej wilgotności (Qingping) nawilżacz na mocno
-    'rh_ok': 48,            # salon: od tej wilgotności nawilżacz wraca do stałej wilgotności
+    'rh_low': 48,           # salon: poniżej tej wilgotności (Qingping) nawilżacz na mocno
+    'rh_ok': 50,            # salon: od tej wilgotności nawilżacz wraca do stałej wilgotności
     'rh_target': 50,        # cel stałej wilgotności w salonie
     'airing': False,        # tryb wietrzenia wyłączony (wróci z czujnikami okien)
     'air_co2_drop': 100,    # wietrzenie: spadek CO2 w 3 min (ppm)
