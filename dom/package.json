@@ -1,0 +1,9 @@
+{
+  "urls": [
+    ["main.py", "github:mojanetia-strona/fitness-app/dom/main.py"],
+    ["miio.py", "github:mojanetia-strona/fitness-app/dom/miio.py"],
+    ["app.py", "github:mojanetia-strona/fitness-app/dom/app.py"],
+    ["version.txt", "github:mojanetia-strona/fitness-app/dom/version.txt"]
+  ],
+  "version": "1.0.0"
+}
