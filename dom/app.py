@@ -10,14 +10,14 @@ try:
 except ImportError:
     import urequests as requests
 
-VERSION = '1.0.19'
+VERSION = '1.0.20'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
     'salon_day': 22.0,      # salon w dzień
     'salon_night': 18.0,    # salon w nocy (po odłożeniu telefonu)
     'bed_day': 17.0,        # sypialnia w dzień (tylko ochrona przed wychłodzeniem)
-    'bed_night': 18.5,      # sypialnia w nocy (do spania chłodniej)
+    'bed_night': 17.0,      # sypialnia w nocy (do spania chłodniej)
     'bed_home': 20.0,       # sypialnia, gdy w niej jestem (Pon-Pt od 18:00, weekend po wstaniu); głowica przy grzejniku, korekta -2
     'bed_morning': 22.0,    # sypialnia przed pobudką (cieplej na wstanie)
     'bed_pre_min': 30,      # ile minut przed pobudką grzać sypialnię
