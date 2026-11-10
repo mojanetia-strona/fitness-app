@@ -10,7 +10,7 @@ try:
 except ImportError:
     import urequests as requests
 
-VERSION = '1.0.8'
+VERSION = '1.0.9'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -18,6 +18,7 @@ PLAN = {
     'salon_night': 18.0,    # salon w nocy (po odłożeniu telefonu)
     'bed_day': 17.0,        # sypialnia w dzień (tylko ochrona przed wychłodzeniem)
     'bed_night': 17.0,      # sypialnia w nocy
+    'bed_home': 20.0,       # sypialnia, gdy w niej jestem (weekend po wstaniu; w tygodniu od 18:00 robi to Google Home)
     'bed_morning': 22.0,    # sypialnia przed pobudką
     'bed_pre_min': 30,      # ile minut przed pobudką grzać sypialnię
     'bed_after_min': 30,    # ile minut po zdjęciu telefonu wyłączyć sypialnię
@@ -408,7 +409,8 @@ def tick_rules(sync, q):
         state['night_on'] = False
     if state.get('bed_off_at') and time.time() >= state['bed_off_at']:
         state['bed_off_at'] = None
-        trv_target('bed', PLAN['bed_day'])
+        # w tygodniu do 18:00 sypialnia stoi pusta; w weekend jestem w domu
+        trv_target('bed', PLAN['bed_home'] if is_weekend() else PLAN['bed_day'])
 
     # --- salon: moc nawilżacza według Qingpinga ---
     if rh is not None and not state.get('airing'):
