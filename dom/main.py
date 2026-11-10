@@ -2,7 +2,7 @@
 import time, json, machine, network, gc
 
 RAW = 'https://raw.githubusercontent.com/mojanetia-strona/fitness-app/main/dom/'
-FILES = ('miio.py', 'app.py', 'main.py')
+FILES = ('miio.mpy', 'app.mpy', 'main.py')  # .mpy = skompilowane, mniej pamięci
 
 
 def wifi(cfg):
@@ -76,6 +76,11 @@ def update():
         import os
         for f in FILES:
             os.rename(f + '.new', f)
+        for f in ('app.py', 'miio.py'):
+            try:
+                os.remove(f)  # stare źródła miałyby pierwszeństwo przed .mpy
+            except OSError:
+                pass
         with open('version.txt', 'w') as o:
             o.write(remote)
         machine.reset()

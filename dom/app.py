@@ -10,7 +10,7 @@ try:
 except ImportError:
     import urequests as requests
 
-VERSION = '1.0.4'
+VERSION = '1.0.5'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
