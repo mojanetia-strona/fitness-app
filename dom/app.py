@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.25'
+VERSION = '1.0.26'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -125,7 +125,7 @@ def gas(params, want=True):
         try:
             if not want:
                 # log: wystarczy, że arkusz przyjął zapytanie (bez czytania całej odpowiedzi, oszczędza pamięć)
-                if r.status_code != 200:
+                if r.status_code >= 400:
                     raise OSError('http %d' % r.status_code)
                 return True
             return r.json()
@@ -141,10 +141,11 @@ def flush_log(extra=''):
     txt = ' | '.join(log_buf)
     if extra:
         txt = (extra + ' | ' + txt) if txt else extra
+    # bufor czyścimy od razu: arkusz zwykle przyjmuje wpis nawet wtedy, gdy odpowiedź się nie doczyta,
+    # a ponawianie zapisywało te same linie co 2 min (śmieci w logu i zjadana pamięć)
+    del log_buf[:]
     try:
-        res = gas({'log': txt[:480]}, False)
-        del log_buf[:]
-        return res
+        return gas({'log': txt[:480]}, False)
     except Exception as e:
         print('gas log err', e)
         return None
