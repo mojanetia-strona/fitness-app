@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.24'
+VERSION = '1.0.25'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -241,6 +241,7 @@ P = {
     'q_rh': (3, 1), 'q_pm25': (3, 4), 'q_t': (3, 7), 'q_co2': (3, 8),
     'on': (2, 1),
     'sh_mode': (2, 3), 'sh_target': (2, 5),          # salon nawilżacz 600ek: 0 stała, 1 sen, 2 mocno
+    'sp_mode': (2, 4),                               # salon oczyszczacz (MIoT): 0 auto, 1 nocny, 2 ulubiony
     'bh_mode': (2, 8),                               # sypialnia deerma jsq2w
 }
 
@@ -477,8 +478,11 @@ def tick_rules(sync, q):
     if asleep and not was:
         log('noc: telefon odlozony')
         dev_set('bed_hum', 'on', False, 'sypialnia nawilzacz off')
-        dev_set('salon_hum', 'on', False, 'salon nawilzacz off')
-        dev_set('salon_pur', 'on', False, 'salon oczyszczacz off')
+        # salon na noc: nawilżacz i oczyszczacz zostają włączone, ale w trybie nocnym (cicho)
+        dev_set('salon_hum', 'on', True)
+        dev_set('salon_hum', 'sh_mode', 1, 'salon nawilzacz tryb nocny')
+        dev_set('salon_pur', 'on', True)
+        dev_set('salon_pur', 'sp_mode', 1, 'salon oczyszczacz tryb nocny')
         trv_target('salon', PLAN['salon_night'])
         trv_target('bed', PLAN['bed_night'])
         state['night_on'] = True
@@ -494,8 +498,12 @@ def tick_rules(sync, q):
     # --- wstałem: telefon zdjęty rano ---
     if was and not asleep and ph and ph.get('e') == 'up':
         log('rano: telefon zdjety')
-        dev_set('salon_hum', 'on', True, 'rano: salon nawilzacz on')
-        dev_set('salon_pur', 'on', True, 'rano: salon oczyszczacz on')
+        # tryb dzienny: nawilżacz na stałą wilgotność (dalej moc ustawia reguła wg Qingpinga), oczyszczacz na auto
+        dev_set('salon_hum', 'on', True)
+        if dev_set('salon_hum', 'sh_mode', 0, 'rano: salon nawilzacz tryb dzienny'):
+            dev_set('salon_hum', 'sh_target', PLAN['rh_target'])
+        dev_set('salon_pur', 'on', True)
+        dev_set('salon_pur', 'sp_mode', 0, 'rano: salon oczyszczacz tryb dzienny (auto)')
         trv_target('salon', PLAN['salon_day'])
         state['bed_off_at'] = time.time() + PLAN['bed_after_min'] * 60
         state['night_on'] = False
@@ -513,7 +521,7 @@ def tick_rules(sync, q):
             trv_target('bed', PLAN['bed_home'])
 
     # --- salon: moc nawilżacza według Qingpinga ---
-    if rh is not None and not state.get('airing'):
+    if rh is not None and not state.get('airing') and not asleep:  # w nocy nie ruszamy trybu nocnego
         on, mode = dev_get('salon_hum', ['on', 'sh_mode'])
         if on:
             if rh < PLAN['rh_low'] and mode != 2:
@@ -638,6 +646,12 @@ def setup():
         pass
     if load_state():
         log('stan przywrocony (noc: %s)' % state.get('asleep'))
+    if not state.get('pur_model') and dev.get('salon_pur'):
+        try:
+            state['pur_model'] = (dev['salon_pur'].call('miIO.info', [], 1) or {}).get('model')
+            log('oczyszczacz model %s' % state['pur_model'])
+        except Exception as e:
+            print('pur model err', e)
     try:
         with open('airing.json') as f:
             state['airing'] = json.load(f)
@@ -667,7 +681,8 @@ def run():
                     print('sync err', e)
                     # brak łączności z arkuszem przez ok. 10 min: zapisz przyczynę i zrestartuj (płytka sama wraca do pracy)
                     state['sync_fail'] = state.get('sync_fail', 0) + 1
-                    if state['sync_fail'] >= 5:
+                    # brak pamięci sam nie minie (rozdrobniona pamięć): restart od razu, a nie po 10 min
+                    if state['sync_fail'] >= 5 or isinstance(e, MemoryError):
                         try:
                             with open('lasterr.txt', 'w') as f:
                                 f.write('%s %s (wolna pamiec %d)' % (stamp(), repr(e)[:120], gc.mem_free()))
