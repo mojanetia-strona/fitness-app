@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.28'
+VERSION = '1.0.29'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -245,7 +245,7 @@ P = {
     'on': (2, 1),
     'sh_mode': (2, 3), 'sh_target': (2, 5),          # salon nawilżacz 600ek: 0 stała, 1 sen, 2 mocno
     'sp_mode': (2, 4),                               # salon oczyszczacz (MIoT): 0 auto, 1 nocny, 2 ulubiony
-    'bh_mode': (2, 8),                               # sypialnia deerma jsq2w
+    'bh_mode': (2, 5),                               # sypialnia deerma jsq2w: 1 poziom 1, 2 poziom 2, 3 poziom 3, 4 stała wilgotność
     'bh_rh': (3, 1),                                 # sypialnia: wilgotność z czujnika nawilżacza
 }
 
@@ -549,6 +549,18 @@ def tick_rules(sync, q):
                     state['bed_pause'] = False
             elif b_on:
                 state['bed_pause'] = False
+                # moc według wilgotności: sucho = mocno, blisko celu = cicho (z zapasem, żeby nie przeskakiwał co chwilę)
+                b_mode, = dev_get('bed_hum', ['bh_mode'])
+                cur = b_mode if b_mode in (1, 2, 3) else 2
+                want = cur
+                if b_rh < 38 or (cur == 3 and b_rh < 42):
+                    want = 3
+                elif b_rh < 48 or (cur == 2 and b_rh < 51):
+                    want = 2
+                else:
+                    want = 1
+                if want != b_mode:
+                    dev_set('bed_hum', 'bh_mode', want, 'sypialnia nawilzacz poziom %d (RH %d)' % (want, b_rh))
     if asleep:
         state['bed_pause'] = False
 
