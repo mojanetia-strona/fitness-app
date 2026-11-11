@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.27'
+VERSION = '1.0.28'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -43,6 +43,8 @@ PLAN = {
     'rh_low': 48,           # salon: poniżej tej wilgotności (Qingping) nawilżacz na mocno
     'rh_ok': 50,            # salon: od tej wilgotności nawilżacz wraca do stałej wilgotności
     'rh_target': 50,        # cel stałej wilgotności w salonie
+    'bed_rh_hi': 55,        # sypialnia: przy tylu % nawilżacz pauza
+    'bed_rh_lo': 47,        # sypialnia: przy tylu % nawilżacz wraca
     'airing': False,        # tryb wietrzenia wyłączony (wróci z czujnikami okien)
     'air_co2_drop': 100,    # wietrzenie: spadek CO2 w 3 min (ppm)
     'air_t_drop': 0.6,      # wietrzenie: spadek temperatury w 3 min (°C)
@@ -533,17 +535,16 @@ def tick_rules(sync, q):
                     dev_set('salon_hum', 'sh_target', PLAN['rh_target'])
 
     # --- sypialnia: nawilżacz sam przestrzeliwuje cel, więc pilnuje go płytka (jego własny czujnik) ---
-    # włączony przeze mnie: przy >= cel+2 pauza (off), przy <= cel-5 z powrotem on. Wyłączony przeze mnie: nie ruszamy.
+    # włączony przeze mnie: przy >= 55% pauza (off), przy <= 47% z powrotem on. Wyłączony przeze mnie: nie ruszamy.
     if not asleep and not state.get('airing') and time.time() - state.get('bed_chk', 0) > 120:
         state['bed_chk'] = time.time()
         b_on, b_rh = dev_get('bed_hum', ['on', 'bh_rh'])
         if b_rh is not None:
             state['bed_rh'] = b_rh
-            tgt = PLAN['rh_target']
-            if b_on and b_rh >= tgt + 2:
+            if b_on and b_rh >= PLAN['bed_rh_hi']:
                 if dev_set('bed_hum', 'on', False, 'sypialnia nawilzacz pauza (RH %d)' % b_rh):
                     state['bed_pause'] = True
-            elif not b_on and state.get('bed_pause') and b_rh <= tgt - 5:
+            elif not b_on and state.get('bed_pause') and b_rh <= PLAN['bed_rh_lo']:
                 if dev_set('bed_hum', 'on', True, 'sypialnia nawilzacz wznowiony (RH %d)' % b_rh):
                     state['bed_pause'] = False
             elif b_on:
