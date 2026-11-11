@@ -1198,3 +1198,49 @@ function labsDue_(ss) {
   return LAB_PANEL.filter(p => last[p.g]).map(p => { const d = toDate_(last[p.g]); d.setMonth(d.getMonth() + p.m); const due = Utilities.formatDate(d, TZ, 'yyyy-MM-dd'); return { n: p.n, due: due, over: due < today }; })
     .filter(x => x.due <= soon);
 }
+
+/* ================= ZADANIA Z KALENDARZA ================= */
+// Wpisy z (ukrytego) kalendarza „Zadania” trafiają o swojej godzinie na listę „zadania” w Google Tasks.
+// Całodniowe wpadają rano (od 7:00). Wymaga usługi Tasks API (Usługi → Tasks). Wyzwalacz co 5 min: uruchom raz zadaniaUstaw.
+const TASKS_CAL = 'Zadania', TASKS_LIST = 'zadania', TASKS_ALLDAY_HOUR = 7;
+function zadaniaZKalendarza() {
+  const cal = CalendarApp.getCalendarsByName(TASKS_CAL)[0];
+  if (!cal) return;
+  const props = PropertiesService.getScriptProperties();
+  const done = JSON.parse(props.getProperty('TASKS_DONE') || '{}');
+  const now = new Date(), from = new Date(now.getTime() - 864e5);
+  const listId = zadaniaListaId_();
+  if (!listId) return;
+  cal.getEvents(from, now).concat(cal.getEventsForDay(now)).forEach(ev => {
+    const allDay = ev.isAllDayEvent();
+    const start = ev.getStartTime();
+    if (allDay) {
+      if (Utilities.formatDate(start, TZ, 'yyyy-MM-dd') !== Utilities.formatDate(now, TZ, 'yyyy-MM-dd')) return;
+      if (Number(Utilities.formatDate(now, TZ, 'H')) < TASKS_ALLDAY_HOUR) return;
+    } else if (start > now) return;
+    const key = ev.getId() + '|' + Utilities.formatDate(start, TZ, 'yyyy-MM-dd HH:mm');
+    if (done[key]) return;
+    Tasks.Tasks.insert({ title: ev.getTitle(), notes: ev.getDescription() || '' }, listId);
+    done[key] = now.getTime();
+  });
+  // porządki: pamiętamy tylko ostatnie 3 dni
+  Object.keys(done).forEach(k => { if (now.getTime() - done[k] > 3 * 864e5) delete done[k]; });
+  props.setProperty('TASKS_DONE', JSON.stringify(done));
+}
+function zadaniaListaId_() {
+  const props = PropertiesService.getScriptProperties();
+  let id = props.getProperty('TASKS_LIST_ID');
+  if (id) return id;
+  const l = (Tasks.Tasklists.list().items || []).filter(x => String(x.title).toLowerCase() === TASKS_LIST)[0];
+  if (l) { props.setProperty('TASKS_LIST_ID', l.id); return l.id; }
+  return null;
+}
+// Uruchom raz z edytora: zakłada wyzwalacz co 5 min i oznacza dzisiejsze, już minione wpisy jako obsłużone (bez dublowania).
+function zadaniaUstaw() {
+  ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === 'zadaniaZKalendarza').forEach(t => ScriptApp.deleteTrigger(t));
+  const cal = CalendarApp.getCalendarsByName(TASKS_CAL)[0], now = new Date(), done = {};
+  if (cal) cal.getEvents(new Date(now.getTime() - 864e5), now).forEach(ev => { done[ev.getId() + '|' + Utilities.formatDate(ev.getStartTime(), TZ, 'yyyy-MM-dd HH:mm')] = now.getTime(); });
+  PropertiesService.getScriptProperties().setProperty('TASKS_DONE', JSON.stringify(done));
+  ScriptApp.newTrigger('zadaniaZKalendarza').timeBased().everyMinutes(5).create();
+  Logger.log('lista: ' + zadaniaListaId_() + ', obsłużone: ' + Object.keys(done).length);
+}
