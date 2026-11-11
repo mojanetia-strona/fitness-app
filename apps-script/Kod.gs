@@ -730,8 +730,20 @@ function phoneNight_(ss, date) {
 
 /* ================= SPOTIFY: poranna muzyka ================= */
 // Jednorazowo: w Ustawieniach projektu > Właściwości skryptu dodaj SPOTIFY_ID i SPOTIFY_SECRET (z developer.spotify.com),
-// potem otwórz ?action=spotify&token=… i zaloguj się do Spotify. Playlistę zmienisz we właściwości SPOTIFY_PLAYLIST.
-const SPOTIFY_DEFAULT_PLAYLIST = 'spotify:playlist:37i9dQZF1FbHjB5h5wVUGD';
+// potem otwórz ?action=spotify&token=… i zaloguj się do Spotify. Rano losuje jedną z playlist SPOTIFY_MORNING; stała playlista: właściwość SPOTIFY_PLAYLIST.
+// Poranna rotacja: playlisty Spotify układane pod gust (same się zmieniają). Losowo, bez powtórki z poprzedniego dnia.
+const SPOTIFY_MORNING = {
+  'daylist': '37i9dQZF1EP6YuccBxUcC1', 'Odkryj w tym tygodniu': '37i9dQZEVXcNhg6nAfGp6t', 'Radar premier': '37i9dQZEVXbipVIAfjlKfh',
+  'Daily Mix 1': '37i9dQZF1E35F7x5saGlIF', 'Daily Mix 2': '37i9dQZF1E37e6oaYSyTAw', 'Daily Mix 3': '37i9dQZF1E363bKnxIKmoX',
+  'Daily Mix 4': '37i9dQZF1E3a56rskZfD2B', 'Daily Mix 5': '37i9dQZF1E38b6w02O3qHQ', 'Daily Mix 6': '37i9dQZF1E39n1yjGzAtNv' };
+function morningPlaylist_() {
+  const pr = PropertiesService.getScriptProperties(), fixed = pr.getProperty('SPOTIFY_PLAYLIST');
+  if (fixed) return { name: 'stała', uri: fixed };
+  const last = pr.getProperty('SPOTIFY_LAST'), names = Object.keys(SPOTIFY_MORNING).filter(n => n !== last);
+  const n = names[Math.floor(Math.random() * names.length)];
+  pr.setProperty('SPOTIFY_LAST', n);
+  return { name: n, uri: 'spotify:playlist:' + SPOTIFY_MORNING[n] };
+}
 // Test z edytora: wybierz testSpotify i kliknij Uruchom (wynik w logu wykonania i w zakładce Dom).
 function testSpotify() { Logger.log(morningMusic_(SpreadsheetApp.getActiveSpreadsheet())); }
 function spotifyRedirect_() { return ScriptApp.getService().getUrl(); }
@@ -784,11 +796,11 @@ function spotifyPlay_(ss, quiet) {
   let res;
   if (!d) res = 'brak urzadzenia (' + dv.map(x => x.name).join(', ') + ')';
   else {
-    const pl = PropertiesService.getScriptProperties().getProperty('SPOTIFY_PLAYLIST') || SPOTIFY_DEFAULT_PLAYLIST;
+    const pl = morningPlaylist_();
     UrlFetchApp.fetch('https://api.spotify.com/v1/me/player/shuffle?state=true&device_id=' + d.id, { method: 'put', headers: h, muteHttpExceptions: true });
     const r = UrlFetchApp.fetch('https://api.spotify.com/v1/me/player/play?device_id=' + d.id, { method: 'put', headers: h, muteHttpExceptions: true,
-      contentType: 'application/json', payload: JSON.stringify({ context_uri: pl }) });
-    res = 'gra na ' + d.name + ' (' + r.getResponseCode() + ')';
+      contentType: 'application/json', payload: JSON.stringify({ context_uri: pl.uri }) });
+    res = 'gra na ' + d.name + ': ' + pl.name + ' (' + r.getResponseCode() + ')';
   }
   if (!quiet || res.indexOf('gra na') === 0) try { const lg = ss.getSheetByName('Dom'); if (lg) lg.appendRow([new Date(), 'spotify: ' + res]); } catch (e) {}
   return res;
