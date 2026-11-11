@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.30'
+VERSION = '1.0.31'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -426,7 +426,7 @@ def day_key():
     return '%04d%02d%02d' % (tm[0], tm[1], tm[2])
 
 
-SAVE_KEYS = ('asleep', 'bed_off_at', 'bed_eve', 'night_on', 'bed_pause', 'bed_auto')
+SAVE_KEYS = ('asleep', 'bed_off_at', 'bed_eve', 'night_on', 'bed_pause')
 
 
 def save_state():
@@ -535,8 +535,8 @@ def tick_rules(sync, q):
                     dev_set('salon_hum', 'sh_target', PLAN['rh_target'])
 
     # --- sypialnia: nawilżacz sam przestrzeliwuje cel, więc pilnuje go płytka (jego własny czujnik) ---
-    # przy >= 55% pauza (off), przy <= 47% z powrotem on (tylko gdy jestem w domu). Wyłączony przeze mnie: nie ruszamy,
-    # poza jednym auto-startem dziennie (Pon-Pt od 18:00, weekend po wstaniu), gdy jest sucho.
+    # włączony przeze mnie lub przez Google Home: przy >= 55% pauza (off), przy <= 47% z powrotem on (tylko gdy jestem w domu).
+    # Wyłączony przeze mnie: nie ruszamy.
     if not asleep and not state.get('airing') and time.time() - state.get('bed_chk', 0) > 120:
         state['bed_chk'] = time.time()
         b_on, b_rh = dev_get('bed_hum', ['on', 'bh_rh'])
@@ -545,18 +545,12 @@ def tick_rules(sync, q):
             if b_on and b_rh >= PLAN['bed_rh_hi']:
                 if dev_set('bed_hum', 'on', False, 'sypialnia nawilzacz pauza (RH %d)' % b_rh):
                     state['bed_pause'] = True
-            elif not b_on and b_rh <= PLAN['bed_rh_lo']:
-                # włączamy sami tylko, gdy jestem w domu (Google Home trzyma wtedy oczyszczacz w salonie włączony),
-                # więc nie kłócimy się z wyłączaniem przy wyjściu. Auto-start raz dziennie: Pon-Pt od 18:00, w weekend po wstaniu.
-                auto = (state.get('bed_auto') != day_key() and m < PLAN['night_from']
-                        and (m >= 1080 or (weekend and m >= 360)))
-                if state.get('bed_pause') or auto:
-                    home, = dev_get('salon_pur', ['on'])
-                    if home:
-                        why = 'wznowiony' if state.get('bed_pause') else 'wlaczony automatycznie'
-                        if dev_set('bed_hum', 'on', True, 'sypialnia nawilzacz %s (RH %d)' % (why, b_rh)):
-                            state['bed_pause'] = False
-                            state['bed_auto'] = day_key()
+            elif not b_on and state.get('bed_pause') and b_rh <= PLAN['bed_rh_lo']:
+                # wznawiamy tylko, gdy jestem w domu (Google Home trzyma wtedy oczyszczacz w salonie włączony);
+                # samo włączanie po powrocie robi Google Home, płytka tego nie dubluje
+                home, = dev_get('salon_pur', ['on'])
+                if home and dev_set('bed_hum', 'on', True, 'sypialnia nawilzacz wznowiony (RH %d)' % b_rh):
+                    state['bed_pause'] = False
             elif b_on:
                 state['bed_pause'] = False
                 # moc według wilgotności: sucho = mocno, blisko celu = cicho (z zapasem, żeby nie przeskakiwał co chwilę)
