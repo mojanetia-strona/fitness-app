@@ -758,7 +758,7 @@ function phoneNight_(ss, date) {
   const up = ev.filter(x => x.e === 'zdjęty' && x.t > bed && x.t >= t(4) && x.t < t(13))[0];
   if (!up) return { date: date, bed: new Date(bed) };
   // korekta 20 min: ok. 15 min zasypiania + 5 min od pobudki do wzięcia telefonu
-  const hours = Math.max(0, Math.round(((up.t - bed) / 36e5 - 20 / 60) * 10) / 10);
+  const hours = Math.max(0, Math.round(((up.t - bed) / 36e5 - 20 / 60) * 100) / 100);
   upsertDaily_(ss, date, { sleep: hours }, 'telefon');
   const v2 = dl.getRange(2, 1, dl.getLastRow() - 1, 1).getValues();
   for (let i = 0; i < v2.length; i++) if (key_(v2[i][0]) === date) { dl.getRange(i + 2, 6, 1, 2).setValues([[new Date(bed), new Date(up.t)]]).setNumberFormat('HH:mm'); break; }

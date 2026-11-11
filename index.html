@@ -729,7 +729,7 @@ async function labScan(){
 function phoneNight(d){ const x=S.diet.daily[d]; if(!x||!x.bed||!x.wake) return null;
   const t=s=>new Date(s.replace(' ','T')).getTime(); const raw=(t(x.wake)-t(x.bed))/36e5; if(!(raw>0&&raw<16)) return null;
   const h=Math.max(0,raw-SLEEP_ADJ_MIN/60); // 15 min na zaśnięcie + 5 min od pobudki do wzięcia telefonu
-  return {h:Math.round(h*10)/10, raw:Math.round(raw*10)/10, bedT:x.bed.slice(11,16), wakeT:x.wake.slice(11,16)}; }
+  return {h:Math.round(h*60)/60, raw:Math.round(raw*60)/60, bedT:x.bed.slice(11,16), wakeT:x.wake.slice(11,16)}; }
 function lastSleep(){ const ks=Object.keys(S.sleep).sort(); return ks.length?S.sleep[ks[ks.length-1]]:null; }
 function qOf(d){ return S.sleepQ&&S.sleepQ[d]!=null?S.sleepQ[d]:(S.diet.daily[d]&&S.diet.daily[d].q!=null&&S.diet.daily[d].q!==''?S.diet.daily[d].q:null); }
 let sleepStarDate=null;
