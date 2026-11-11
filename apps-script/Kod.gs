@@ -708,7 +708,7 @@ function phoneEvent_(ss, e) {
 /* Budziki z kalendarza: każde jutrzejsze wydarzenie z godziną (bez całodniowych i odrzuconych)
    dostaje budzik 2 h wcześniej. Skrót „Ładowarka ON” ustawia je w iPhonie. */
 const ALARM_BEFORE_MIN = 120;
-const ALARM_SKIP_CALENDARS = ['Zadania', 'Święta w Polsce'];
+const ALARM_SKIP_CALENDARS = ['Zadania', 'Święta w Polsce', 'Sport'];
 function calendarAlarms_(now, hr) {
   try {
     const day = new Date(now.getTime() + (hr < 4 ? 0 : 864e5));
