@@ -558,7 +558,7 @@ V.train = () => {
 function quickWeight(){
   const t=today(); if(S.weights.some(w=>w.date===t)) return '';
   const last=sortedWeights().slice(-1)[0];
-  return `<div class="qw"><span class="l">Waga dziś<small>rano, na czczo</small></span><button class="step sm" data-a="qwstep" data-v="-0.1" aria-label="Minus 0,1">−</button><input id="qwkg" inputmode="decimal" value="${last?fN(last.kg):''}" placeholder="85,0" aria-label="Dzisiejsza waga w kg"><button class="step sm" data-a="qwstep" data-v="0.1" aria-label="Plus 0,1">+</button><button class="btn primary sm" data-a="qwSave">Zapisz</button></div>`;
+  return `<div class="qw"><span class="l">Waga dziś<small>rano, na czczo</small></span><button class="step sm" data-a="qwstep" data-v="-0.1" aria-label="Minus 0,1">−</button><input id="qwkg" inputmode="decimal" value="${last?fN(last.kg,2):''}" placeholder="85,0" aria-label="Dzisiejsza waga w kg"><button class="step sm" data-a="qwstep" data-v="0.1" aria-label="Plus 0,1">+</button><button class="btn primary sm" data-a="qwSave">Zapisz</button></div>`;
 }
 /* ---- cardio ---- */
 let cardioDraft=null; // {type, date}
@@ -635,10 +635,10 @@ V.weight = () => {
   const cur=a7??(last&&last.kg); const prog=cur?Math.max(0,Math.min(1,(cur-GOAL.start)/(GOAL.target-GOAL.start))):0;
   let h=`<h2>Waga i sen</h2><p class="lede">Rano, na czczo, 3 do 4 razy w tygodniu. Liczy się średnia tygodniowa.</p>
   <div class="panel"><div class="grid2"><div class="field"><label class="label" for="wdate">Data</label><input type="date" id="wdate" value="${t}"></div><div></div></div>
-    <div class="big-in mt"><button class="step" data-a="wstep" data-v="-0.1" aria-label="Minus 0,1">−</button><input id="wkg" inputmode="decimal" value="${last?fN(last.kg):''}" placeholder="85,0" aria-label="Waga w kg"><button class="step" data-a="wstep" data-v="0.1" aria-label="Plus 0,1">+</button></div>
+    <div class="big-in mt"><button class="step" data-a="wstep" data-v="-0.1" aria-label="Minus 0,1">−</button><input id="wkg" inputmode="decimal" value="${last?fN(last.kg,2):''}" placeholder="85,0" aria-label="Waga w kg"><button class="step" data-a="wstep" data-v="0.1" aria-label="Plus 0,1">+</button></div>
     <button class="btn primary block mt" data-a="saveWeight">Zapisz wagę</button></div>
   ${sleepPanel()}
-  <div class="strip mt"><div><div class="label">Śr. 7 dni</div><div class="v">${fN(a7)}<small>kg</small></div></div>
+  <div class="strip mt"><div><div class="label">Śr. 7 dni</div><div class="v">${fN(a7,2)}<small>kg</small></div></div>
     <div><div class="label">Tempo / tydz.</div><div class="v">${rate==null?'–':(rate>0?'+':'')+fN(rate,2)}<small>kg</small></div></div>
     <div><div class="label">Status</div><div style="margin-top:6px">${st}</div></div></div>
   <div class="panel mt"><div class="row" style="justify-content:space-between"><span class="label">Cel masy</span><span class="num" style="font-weight:600">${fN(GOAL.start,0)} → ${fN(GOAL.target)} kg</span></div><div class="target"><i style="width:${(prog*100).toFixed(0)}%"></i></div>
@@ -650,7 +650,7 @@ V.weight = () => {
     const xl=[recent[0],recent[recent.length-1]].map(w=>({x:daysBetween(base,w.date),l:fD(w.date)}));
     h+=`<h3>Ostatnie 8 tygodni</h3><div class="panel">${lineChart([{pts,color:'#B7C2CA',dots:true,line:false,r:2.5},{pts:avg,color:'var(--accent)',width:2.5,end:true}],{xl,label:'Waga i średnia 7 dni'})}
       <div class="row note" style="gap:14px"><span><span style="color:#B7C2CA">●</span> pomiar</span><span><span style="color:var(--accent)">━</span> średnia 7 dni</span></div></div>`; }
-  h+=`<h3>Wpisy</h3><div class="panel list">${ws.slice(-12).reverse().map(w=>`<div class="li"><span class="d">${fD(w.date)}</span><span class="v">${fN(w.kg)} kg</span><button class="x" data-a="delWeight" data-v="${w.date}" data-confirm="1">Usuń</button></div>`).join('')||'<div class="empty">Brak wpisów. Zapisz pierwszą wagę powyżej.</div>'}</div>`;
+  h+=`<h3>Wpisy</h3><div class="panel list">${ws.slice(-12).reverse().map(w=>`<div class="li"><span class="d">${fD(w.date)}</span><span class="v">${fN(w.kg,2)} kg</span><button class="x" data-a="delWeight" data-v="${w.date}" data-confirm="1">Usuń</button></div>`).join('')||'<div class="empty">Brak wpisów. Zapisz pierwszą wagę powyżej.</div>'}</div>`;
   return h;
 };
 function sleepOf(d){ return S.sleep[d]!=null?S.sleep[d]:(S.diet.daily[d]&&S.diet.daily[d].sleep!=null?S.diet.daily[d].sleep:null); }
@@ -1008,9 +1008,9 @@ const A = {
     let id=known&&known.id; if(!id){ id='c-'+slug(name); S.customEx[id]={id,name,m,sets:3,reps:[8,12],rest:90,inc:2.5}; }
     applySwap(id); },
   exRemove(b){ const i=+b.dataset.v; S.active.ex.splice(i,1); swapFor=null; save(); render(); },
-  qwstep(b){ const el=$('#qwkg'); const v=(num(el.value)||85)+parseFloat(b.dataset.v); el.value=fN(Math.round(v*10)/10); },
+  qwstep(b){ const el=$('#qwkg'); const v=(num(el.value)||85)+parseFloat(b.dataset.v); el.value=fN(Math.round(v*100)/100,2); },
   qwSave(){ const kg=num($('#qwkg').value), date=today(); if(!kg||kg<30||kg>250) return flash($('#qwkg'));
-    S.weights=S.weights.filter(w=>w.date!==date); S.weights.push({date,kg}); enqueue('weight',{date,kg},'wt:'+date); render(); toast('Zapisano wagę: '+fN(kg)+' kg'); },
+    S.weights=S.weights.filter(w=>w.date!==date); S.weights.push({date,kg}); enqueue('weight',{date,kg},'wt:'+date); render(); toast('Zapisano wagę: '+fN(kg,2)+' kg'); },
   cdOpen(){ cardioDraft={type:(S.cardio.slice().sort((a,b)=>a.date<b.date?1:-1)[0]||{}).type||'Rower', date:today()}; render(); const p=$('#cdp'); if(p) p.scrollIntoView({block:'center'}); },
   cdType(b){ cardioKeep(); cardioDraft.type=b.dataset.v; render(); },
   cdCancel(){ cardioDraft=null; render(); },
@@ -1022,11 +1022,11 @@ const A = {
   dismissSummary(){ S.summary=null; save(); render(); },
   restAdd(b){ if(rest){ rest.end+=(+b.dataset.v)*1000; rest.total=Math.max(rest.total,(rest.end-Date.now())/1000); rest.fired=false; $('#rest').classList.remove('over'); tickRest(); } },
   restStop(){ stopRest(); },
-  wstep(b){ const el=$('#wkg'); const v=(num(el.value)||85)+parseFloat(b.dataset.v); el.value=fN(Math.round(v*10)/10); },
+  wstep(b){ const el=$('#wkg'); const v=(num(el.value)||85)+parseFloat(b.dataset.v); el.value=fN(Math.round(v*100)/100,2); },
   saveWeight(){ const kg=num($('#wkg').value), date=$('#wdate').value||today();
     if(!kg||kg<30||kg>250) return flash($('#wkg'));
     S.weights=S.weights.filter(w=>w.date!==date); S.weights.push({date,kg}); enqueue('weight',{date,kg},'wt:'+date);
-    render(); toast('Zapisano wagę: '+fN(kg)+' kg'); },
+    render(); toast('Zapisano wagę: '+fN(kg,2)+' kg'); },
   saveSleep(){ const date=$('#sdate').value||today(); const sl=num($('#wsleep').value);
     if(sl==null || sl<=0 || sl>16) return flash($('#wsleep'));
     S.sleep[date]=sl; enqueue('daily',{date, sleep:sl},'sl:'+date);

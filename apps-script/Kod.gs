@@ -219,7 +219,7 @@ function buildRecords_(ss) {
     'label D \'Ćwiczenie\', max(H) \'Najlepszy e1RM\', max(F) \'Max ciężar\', count(D) \'Serie łącznie\', max(B) \'Ostatnio\'",0),' +
     '{"Ćwiczenie","Najlepszy e1RM","Max ciężar","Serie łącznie","Ostatnio"})'));
   sh.getRange('A1:E1').setBackground(C.head).setFontColor(C.headTxt).setFontWeight('bold');
-  sh.getRange('B2:C').setNumberFormat('0.0" kg"');
+  sh.getRange('B2:C').setNumberFormat('0.00" kg"');
   sh.getRange('E2:E').setNumberFormat('d mmm yyyy');
   sh.setColumnWidth(1, 290); sh.setColumnWidths(2, 4, 120);
   sh.setFrozenRows(1);
@@ -252,8 +252,8 @@ function buildDashboard_(ss, sh) {
   const WEEK0 = 'TODAY()-WEEKDAY(TODAY(),2)+1';
   const tiles = [
     // [kolumna start, wiersz, etykieta, formuła, format, podpis]
-    ['B', 5, 'ŚREDNIA 7 DNI', '=IF(COUNTA(Waga!A2:A)=0,"–",INDEX(Waga!C2:C,COUNTA(Waga!A2:A)))', '0.0" kg"',
-      '=IF(COUNTA(Waga!A2:A)=0,"brak wpisów","ostatni wpis: "&TEXT(INDEX(Waga!B2:B,COUNTA(Waga!A2:A)),"0.0")&" kg")'],
+    ['B', 5, 'ŚREDNIA 7 DNI', '=IF(COUNTA(Waga!A2:A)=0,"–",INDEX(Waga!C2:C,COUNTA(Waga!A2:A)))', '0.00" kg"',
+      '=IF(COUNTA(Waga!A2:A)=0,"brak wpisów","ostatni wpis: "&TEXT(INDEX(Waga!B2:B,COUNTA(Waga!A2:A)),"0.00")&" kg")'],
     ['D', 5, 'TEMPO / TYDZIEŃ', '=IF(COUNTA(Waga!A2:A)<2,"–",INDEX(Waga!D2:D,COUNTA(Waga!A2:A)))', '+0.00" kg";-0.00" kg"',
       '=IF(NOT(ISNUMBER(D6)),"cel 0,2-0,35 kg",IF(D6<0.2,"za wolno: dodaj 100-150 kcal",IF(D6<=0.35,"w celu 0,2-0,35 kg",IF(D6<=0.5,"szybko, obserwuj","za szybko: odejmij 100-150 kcal"))))'],
     ['F', 5, 'DO CELU', '=IF(ISNUMBER(B6),K5-B6,"–")', '0.0" kg"',
@@ -566,6 +566,7 @@ function rewriteWeightFormulas_(sh) {
   }
   sh.getRange(2, 3, n, 1).setFormulasR1C1(c);
   sh.getRange(2, 4, n, 1).setFormulasR1C1(d);
+  sh.getRange(2, 2, n, 2).setNumberFormat('0.00" kg"'); // waga z dokładnością wagi (0,05 kg)
 }
 
 function pullAll_(ss) {
@@ -731,8 +732,8 @@ function espSync_(ss, p) {
     // liczy się pierwsze ważenie dnia (rano); późniejsze tylko logujemy
     const date = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd'), sh = ss.getSheetByName(SH.WEIGHT);
     const has = sh.getLastRow() > 1 && sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues().some(r => r[0] && key_(r[0]) === date);
-    if (!has) { upsertByDate_(sh, date, [Math.round(kg * 10) / 10]); rewriteWeightFormulas_(sh); out.kg = Math.round(kg * 10) / 10; }
-    else out.kg_skipped = Math.round(kg * 10) / 10;
+    if (!has) { upsertByDate_(sh, date, [Math.round(kg * 100) / 100]); rewriteWeightFormulas_(sh); out.kg = Math.round(kg * 100) / 100; }
+    else out.kg_skipped = Math.round(kg * 100) / 100;
   }
   if (p.log) {
     const lg = ss.getSheetByName('Dom') || (function () { const s = ss.insertSheet('Dom'); s.appendRow(['Czas', 'Wpis']); s.setFrozenRows(1); s.getRange('A:A').setNumberFormat('d mmm yyyy HH:mm'); return s; })();
@@ -769,9 +770,9 @@ function dailyFromShortcut_(ss, p) {
   let wOk = false;
   if (kg !== null && kg >= 30 && kg <= 250) {
     const sh = ss.getSheetByName(SH.WEIGHT);
-    upsertByDate_(sh, date, [Math.round(kg * 10) / 10]); rewriteWeightFormulas_(sh); wOk = true;
+    upsertByDate_(sh, date, [Math.round(kg * 100) / 100]); rewriteWeightFormulas_(sh); wOk = true;
   }
-  return { ok: true, date: date, steps: numIn_(p.steps), sleep: sleep, kg: wOk ? Math.round(kg * 10) / 10 : null };
+  return { ok: true, date: date, steps: numIn_(p.steps), sleep: sleep, kg: wOk ? Math.round(kg * 100) / 100 : null };
 }
 function sleepHours_(p) {
   if (numIn_(p.sleep_s) !== null) return Math.round(numIn_(p.sleep_s) / 360) / 10;
