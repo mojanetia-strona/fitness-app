@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.23'
+VERSION = '1.0.24'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -629,6 +629,13 @@ def setup():
     except Exception:
         rc = '?'
     log('start v%s (%s), urzadzenia: %s' % (VERSION, rc, ','.join(sorted(dev.keys()))))
+    try:
+        import os
+        with open('lasterr.txt') as f:
+            log('restart po braku polaczenia z arkuszem: ' + f.read()[:160])
+        os.remove('lasterr.txt')
+    except OSError:
+        pass
     if load_state():
         log('stan przywrocony (noc: %s)' % state.get('asleep'))
     try:
@@ -655,8 +662,18 @@ def run():
                 last_sync = time.time()
                 try:
                     sync = gas({})
+                    state['sync_fail'] = 0
                 except Exception as e:
                     print('sync err', e)
+                    # brak łączności z arkuszem przez ok. 10 min: zapisz przyczynę i zrestartuj (płytka sama wraca do pracy)
+                    state['sync_fail'] = state.get('sync_fail', 0) + 1
+                    if state['sync_fail'] >= 5:
+                        try:
+                            with open('lasterr.txt', 'w') as f:
+                                f.write('%s %s (wolna pamiec %d)' % (stamp(), repr(e)[:120], gc.mem_free()))
+                        except Exception:
+                            pass
+                        machine.reset()
             if time.time() - last_rules >= 60:
                 last_rules = time.time()
                 q = dev_get('qingping', ['q_rh', 'q_pm25', 'q_t', 'q_co2'])
