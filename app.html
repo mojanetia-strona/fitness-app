@@ -498,7 +498,7 @@ function tickRest(){
 }
 let wl=null;
 async function wake(on){ try{ if(on && navigator.wakeLock){ wl=await navigator.wakeLock.request('screen'); } else if(!on && wl){ await wl.release(); wl=null; } }catch(e){} }
-function morningPull(){ const h=new Date().getHours(); const dd=S.diet.daily[today()]; if(h>=4&&h<14&&!(dd&&dd.wake)&&!(S.diet.fetched&&Date.now()-S.diet.fetched<60000)) fetchDiet(true); }
+function morningPull(){ const h=new Date().getHours(); const t=today(); const dd=S.diet.daily[t]; const noW=!S.weights.some(w=>w.date===t); if(h>=4&&h<14&&(!(dd&&dd.wake)||noW)&&!(S.diet.fetched&&Date.now()-S.diet.fetched<60000)) fetchDiet(true); }
 document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible'){ morningPull(); checkIdle(); if(S.active) wake(true); sync(); } });
 
 
@@ -990,7 +990,7 @@ window.addEventListener('online',()=>{ sync(); fetchDiet(true); });
 
 /* ============ actions ============ */
 const A = {
-  nav(b){ const v=b.dataset.v; if(v==='train' && S.active) S.view='workout'; else S.view=v; if(v==='diet'){ S.dietDate=today(); draft=null; aiDraft=null; fetchDiet(); } if(v==='weight'||v==='measure'){ const dd=S.diet.daily[today()]; fetchDiet(v==='weight'&&!(dd&&dd.wake)); } save(); render(); window.scrollTo(0,0); },
+  nav(b){ const v=b.dataset.v; if(v==='train' && S.active) S.view='workout'; else S.view=v; if(v==='diet'){ S.dietDate=today(); draft=null; aiDraft=null; fetchDiet(); } if(v==='weight'||v==='measure'){ const dd=S.diet.daily[today()]; fetchDiet(v==='weight'&&(!(dd&&dd.wake)||!S.weights.some(w=>w.date===today()))); } save(); render(); window.scrollTo(0,0); },
   start(b){ if(S.active && S.active.dayId!==b.dataset.v){ S.view='workout'; render(); return; } if(S.active){ S.view='workout'; render(); return; } startWorkout(b.dataset.v); window.scrollTo(0,0); },
   tick(b){ unlockAudio(); const i=+b.dataset.i, j=+b.dataset.j; const s=S.active.ex[i].sets[j]; s.done=!s.done; s.ts=Date.now(); save(); rerenderCard(i);
     if(s.done){ const d=exD(S.active.ex[i].exId); const lastEx=i===S.active.ex.length-1 && S.active.ex[i].sets.every(x=>x.done); if(!lastEx) startRest(d.rest, d.name); } },
