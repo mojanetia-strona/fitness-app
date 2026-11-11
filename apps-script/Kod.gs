@@ -701,9 +701,45 @@ function phoneEvent_(ss, e) {
   const hr = Number(Utilities.formatDate(now, TZ, 'H'));
   if (e === 'up' && hr >= 4 && hr < 13) return Object.assign({ ok: true }, phoneNight_(ss, Utilities.formatDate(now, TZ, 'yyyy-MM-dd')));
   // noc: odłożenie po 21:00 (skrót iOS ustawia wtedy Spotify jako ostatnio grającą aplikację na poranek)
-  if (e === 'down' && (hr >= 21 || hr < 4)) return { ok: true, noc: true };
+  if (e === 'down' && (hr >= 21 || hr < 4)) return { ok: true, noc: true, budziki: calendarAlarms_(now, hr) };
   return { ok: true };
 }
+
+/* Budziki z kalendarza: każde jutrzejsze wydarzenie z godziną (bez całodniowych i odrzuconych)
+   dostaje budzik 2 h wcześniej. Skrót „Ładowarka ON” ustawia je w iPhonie. */
+const ALARM_BEFORE_MIN = 120;
+function calendarAlarms_(now, hr) {
+  try {
+    const day = new Date(now.getTime() + (hr < 4 ? 0 : 864e5));
+    const ymd = Utilities.formatDate(day, TZ, 'yyyy-MM-dd');
+    const from = new Date(ymd + 'T00:00:00' + tzOffset_(day)), to = new Date(from.getTime() + 864e5);
+    const seen = {}, out = [];
+    CalendarApp.getAllCalendars().forEach(cal => {
+      cal.getEvents(from, to).forEach(ev => {
+        if (ev.isAllDayEvent()) return;
+        try { if (ev.getMyStatus() === CalendarApp.GuestStatus.NO) return; } catch (x) {}
+        const start = ev.getStartTime();
+        if (start < from) return; // zaczęło się wcześniej (np. wielodniowe)
+        const alarm = new Date(start.getTime() - ALARM_BEFORE_MIN * 6e4);
+        if (alarm <= now) return;
+        const title = String(ev.getTitle() || 'Wydarzenie').slice(0, 40);
+        const key = start.getTime() + '|' + title;
+        if (seen[key]) return; seen[key] = 1;
+        out.push({ t: Utilities.formatDate(alarm, TZ, "yyyy-MM-dd'T'HH:mm:00"), n: title + ' ' + Utilities.formatDate(start, TZ, 'H:mm'), s: start.getTime() });
+      });
+    });
+    out.sort((a, b) => a.s - b.s);
+    out.forEach(a => delete a.s);
+    PropertiesService.getScriptProperties().setProperty('ALARMS_NEXT', JSON.stringify(out));
+    return out;
+  } catch (err) {
+    console.log('calendarAlarms_ ' + err);
+    return [];
+  }
+}
+function tzOffset_(d) { const z = Utilities.formatDate(d, TZ, 'Z'); return z.slice(0, 3) + ':' + z.slice(3); }
+// Test z edytora: pokazuje, jakie budziki ustawiłby dziś wieczorem (i prosi o zgodę na kalendarz przy pierwszym uruchomieniu).
+function testBudziki() { Logger.log(JSON.stringify(calendarAlarms_(new Date(), 22))); }
 function phoneNight_(ss, date) {
   const dl = ss.getSheetByName(SH.DAILY);
   if (dl.getMaxColumns() < 7) dl.insertColumnsAfter(dl.getMaxColumns(), 7 - dl.getMaxColumns());
