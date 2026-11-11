@@ -10,7 +10,7 @@ try:
 except ImportError:
     import urequests as requests
 
-VERSION = '1.0.21'
+VERSION = '1.0.22'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -22,7 +22,7 @@ PLAN = {
     'bed_morning': 22.0,    # sypialnia przed pobudką (cieplej na wstanie)
     'bed_pre_min': 30,      # ile minut przed pobudką grzać sypialnię
     'bed_after_min': 30,    # ile minut po zdjęciu telefonu wyłączyć sypialnię
-    'salon_pre_min': 60,    # ile minut przed pobudką włączyć salon (nawilżacz, oczyszczacz)
+    'salon_pre_min': 60,    # (nieużywane) nawilżacz i oczyszczacz włączają się dopiero po zdjęciu telefonu
     'salon_heat_pre_min': 60,  # ile minut przed pobudką grzać salon na dzień
     'wake_wd': 420,         # domyślna pobudka w tygodniu (min od północy), gdy brak danych z telefonu
     'wake_we': 540,         # domyślna pobudka w weekend
@@ -94,7 +94,7 @@ def log(msg):
 
 
 # ---------- Apps Script ----------
-def gas(params):
+def gas(params, want=True):
     url = cfg['gas_url'] + '?action=esp&token=' + cfg['gas_token']
     for k in params:
         v = str(params[k])
@@ -111,6 +111,11 @@ def gas(params):
     try:
         r = requests.get(url, timeout=25)
         try:
+            if not want:
+                # log: wystarczy, że arkusz przyjął zapytanie (bez czytania całej odpowiedzi, oszczędza pamięć)
+                if r.status_code != 200:
+                    raise OSError('http %d' % r.status_code)
+                return True
             return r.json()
         finally:
             r.close()
@@ -125,7 +130,7 @@ def flush_log(extra=''):
     if extra:
         txt = (extra + ' | ' + txt) if txt else extra
     try:
-        res = gas({'log': txt[:480]})
+        res = gas({'log': txt[:480]}, False)
         del log_buf[:]
         return res
     except Exception as e:
@@ -363,7 +368,7 @@ def scale_tick():
         gas({'kg': '%.2f' % kg})
         scale['last_kg'] = kg
         scale['last_sent'] = time.time()
-        log('waga %.1f kg zapisana' % kg)
+        log('waga %.2f kg zapisana' % kg)
     except Exception as e:
         log('waga blad %s' % e)
         scale['pending'] = kg
@@ -404,6 +409,37 @@ def day_key():
     return '%04d%02d%02d' % (tm[0], tm[1], tm[2])
 
 
+SAVE_KEYS = ('asleep', 'bed_off_at', 'bed_eve', 'night_on')
+
+
+def save_state():
+    d = {k: state.get(k) for k in SAVE_KEYS}
+    for k in state:
+        if k.startswith('once_'):
+            d[k] = state[k]
+    if d == state.get('_saved'):
+        return
+    try:
+        with open('state.json', 'w') as f:
+            json.dump({'t': time.time(), 's': d}, f)
+        state['_saved'] = d
+    except Exception as e:
+        print('state save err', e)
+
+
+def load_state():
+    try:
+        with open('state.json') as f:
+            j = json.load(f)
+        if time.time() - j.get('t', 0) < 12 * 3600:
+            state.update(j['s'])
+            state['_saved'] = j['s']
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def once(key):
     """True tylko za pierwszym razem danego dnia."""
     k = 'once_' + key
@@ -418,8 +454,9 @@ def tick_rules(sync, q):
     m = mins()
     weekend = is_weekend()
     ph = (sync or {}).get('phone')
-    asleep = phone_asleep(ph)
     was = state.get('asleep')
+    # bez odpowiedzi z arkusza nie zgadujemy: zostaje poprzedni stan (inaczej po restarcie noc/pobudka odpalałyby się drugi raz)
+    asleep = phone_asleep(ph) if sync else bool(was)
     if was and not asleep and m < 240:
         asleep = True  # zerknięcie na telefon w nocy to jeszcze nie pobudka
     state['asleep'] = asleep
@@ -437,9 +474,6 @@ def tick_rules(sync, q):
     # --- rano, przed pobudką (tylko gdy telefon nadal leży = jestem w domu) ---
     if asleep and m < 720:
         wm = wake_min(sync, weekend)
-        if m >= wm - PLAN['salon_pre_min'] and once('salon_morning'):
-            dev_set('salon_hum', 'on', True, 'rano: salon nawilzacz on')
-            dev_set('salon_pur', 'on', True, 'rano: salon oczyszczacz on')
         if m >= wm - PLAN['salon_heat_pre_min'] and once('salon_heat'):
             trv_target('salon', PLAN['salon_day'])
         if m >= wm - PLAN['bed_pre_min'] and once('bed_heat'):
@@ -448,6 +482,8 @@ def tick_rules(sync, q):
     # --- wstałem: telefon zdjęty rano ---
     if was and not asleep and ph and ph.get('e') == 'up':
         log('rano: telefon zdjety')
+        dev_set('salon_hum', 'on', True, 'rano: salon nawilzacz on')
+        dev_set('salon_pur', 'on', True, 'rano: salon oczyszczacz on')
         trv_target('salon', PLAN['salon_day'])
         state['bed_off_at'] = time.time() + PLAN['bed_after_min'] * 60
         state['night_on'] = False
@@ -576,7 +612,13 @@ def setup():
         d = cfg.get('devices', {}).get(name)
         if d and d.get('ip') and d.get('token') and len(d['token']) == 32:
             dev[name] = Device(d['ip'], d['token'], name)
-    log('start v%s, urzadzenia: %s' % (VERSION, ','.join(sorted(dev.keys()))))
+    try:
+        rc = {1: 'zasilanie', 2: 'reset', 3: 'straznik', 4: 'uspienie', 5: 'programowy'}.get(machine.reset_cause(), str(machine.reset_cause()))
+    except Exception:
+        rc = '?'
+    log('start v%s (%s), urzadzenia: %s' % (VERSION, rc, ','.join(sorted(dev.keys()))))
+    if load_state():
+        log('stan przywrocony (noc: %s)' % state.get('asleep'))
     try:
         with open('airing.json') as f:
             state['airing'] = json.load(f)
@@ -608,6 +650,7 @@ def run():
                 q = dev_get('qingping', ['q_rh', 'q_pm25', 'q_t', 'q_co2'])
                 state['q'] = q
                 tick_rules(sync, q)
+                save_state()
             scale_tick()
             if log_buf and (time.time() - last_report > 120 or len(log_buf) > 8):
                 last_report = time.time()
