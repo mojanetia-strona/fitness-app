@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.26'
+VERSION = '1.0.27'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -244,6 +244,7 @@ P = {
     'sh_mode': (2, 3), 'sh_target': (2, 5),          # salon nawilżacz 600ek: 0 stała, 1 sen, 2 mocno
     'sp_mode': (2, 4),                               # salon oczyszczacz (MIoT): 0 auto, 1 nocny, 2 ulubiony
     'bh_mode': (2, 8),                               # sypialnia deerma jsq2w
+    'bh_rh': (3, 1),                                 # sypialnia: wilgotność z czujnika nawilżacza
 }
 
 
@@ -423,7 +424,7 @@ def day_key():
     return '%04d%02d%02d' % (tm[0], tm[1], tm[2])
 
 
-SAVE_KEYS = ('asleep', 'bed_off_at', 'bed_eve', 'night_on')
+SAVE_KEYS = ('asleep', 'bed_off_at', 'bed_eve', 'night_on', 'bed_pause')
 
 
 def save_state():
@@ -530,6 +531,25 @@ def tick_rules(sync, q):
             elif rh >= PLAN['rh_ok'] and mode == 2:
                 if dev_set('salon_hum', 'sh_mode', 0, 'salon nawilzacz stala wilgotnosc (RH %d)' % rh):
                     dev_set('salon_hum', 'sh_target', PLAN['rh_target'])
+
+    # --- sypialnia: nawilżacz sam przestrzeliwuje cel, więc pilnuje go płytka (jego własny czujnik) ---
+    # włączony przeze mnie: przy >= cel+2 pauza (off), przy <= cel-5 z powrotem on. Wyłączony przeze mnie: nie ruszamy.
+    if not asleep and not state.get('airing') and time.time() - state.get('bed_chk', 0) > 120:
+        state['bed_chk'] = time.time()
+        b_on, b_rh = dev_get('bed_hum', ['on', 'bh_rh'])
+        if b_rh is not None:
+            state['bed_rh'] = b_rh
+            tgt = PLAN['rh_target']
+            if b_on and b_rh >= tgt + 2:
+                if dev_set('bed_hum', 'on', False, 'sypialnia nawilzacz pauza (RH %d)' % b_rh):
+                    state['bed_pause'] = True
+            elif not b_on and state.get('bed_pause') and b_rh <= tgt - 5:
+                if dev_set('bed_hum', 'on', True, 'sypialnia nawilzacz wznowiony (RH %d)' % b_rh):
+                    state['bed_pause'] = False
+            elif b_on:
+                state['bed_pause'] = False
+    if asleep:
+        state['bed_pause'] = False
 
     # --- bezpiecznik wietrzenia ---
     if co2 is not None and t is not None:
@@ -703,7 +723,7 @@ def run():
             if time.time() - state.get('hb', 0) > 1800:
                 state['hb'] = time.time()
                 q = state.get('q') or [None] * 4
-                flush_log('ok RH %s T %s CO2 %s PM %s | %s | mem %d' % (q[0], q[2], q[3], q[1], trv_brief(), gc.mem_free()))
+                flush_log('ok RH %s T %s CO2 %s PM %s | sypialnia RH %s | %s | mem %d' % (q[0], q[2], q[3], q[1], state.get('bed_rh'), trv_brief(), gc.mem_free()))
             if time.time() - state.get('upd', time.time() - 600) > 10800:
                 state['upd'] = time.time()
                 check_update()
