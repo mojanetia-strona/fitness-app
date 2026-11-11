@@ -203,7 +203,7 @@ h3{font-weight:700;font-size:18px;color:var(--navy);margin:26px 0 10px}
 .err{color:var(--bad);font-size:13px;margin:8px 0 0}
 .li .v.tap{border:0;background:none;text-align:left;padding:0;cursor:pointer}
 .meal .sw{flex:none;border:1.5px solid var(--line);background:var(--surface);border-radius:999px;padding:5px 10px;font-size:12px;font-weight:700;color:var(--navy);margin-top:2px}
-.phn{background:var(--accent-soft);padding:10px 12px;margin-top:10px;font-size:13.5px;color:var(--navy)}
+.phn{background:var(--accent-soft);padding:10px 12px;margin-top:10px;font-size:clamp(11px,3.1vw,13.5px);color:var(--navy);white-space:nowrap;text-align:center}
 .stars{display:flex;gap:6px}
 .stars .star{flex:1;height:50px;border:1.5px solid var(--line);background:var(--surface);font-size:26px;line-height:1;color:var(--line);border-radius:0}
 .stars .star.on{color:#E8A317;border-color:#E8A317;background:#FFF8E6}
@@ -740,7 +740,7 @@ function sleepPanel(){
   const as=a(days.map(sleepOf).filter(x=>x!=null&&x!=='')), at=a(days.map(x=>S.diet.daily[x]&&S.diet.daily[x].steps).filter(x=>x!=null&&x!==''));
   const recent=days.filter(x=>sleepOf(x)!=null).slice(0,7);
   const ph=phoneNight(d); const confirmed=S.sleep[d]!=null;
-  const phTxt=ph?`<div class="phn"><span>📱 Odłożony: <b>${ph.bedT}</b> · Zdjęty: <b>${ph.wakeT}</b> · −20 min = <b>${fN(ph.h)} h</b></span></div>`:'';
+  const phTxt=ph?`<div class="phn"><span>Odłożony: <b>${ph.bedT}</b> · Zdjęty: <b>${ph.wakeT}</b> · −20 min = <b>${fN(ph.h)} h</b></span></div>`:'';
   return `<h3>Sen</h3><div class="panel"><p class="note" style="margin-top:0">${ph?'Sen zapisuje się sam z telefonu.':'Sen zapisuje się sam, gdy telefon leży w nocy na ładowarce. Bez tego możesz wpisać go tutaj.'}</p>
     <div class="grid2"><div class="field"><label class="label" for="sdate">Dzień (rano po nocy)</label><input type="date" id="sdate" value="${d}" data-sdate="1"></div><div></div></div>
     <div class="row mt" style="flex-wrap:nowrap"><button class="step" data-a="sstep" data-v="-0.5" aria-label="Minus pół godziny">−</button><input id="wsleep" inputmode="decimal" value="${cur!=null?fN(cur):''}" placeholder="${fN(lastSleep()??8)}" aria-label="Sen w godzinach" style="flex:1;min-width:0;height:60px;border:1px solid var(--line);text-align:center;font:700 30px var(--f-body);color:var(--navy)"><button class="step" data-a="sstep" data-v="0.5" aria-label="Plus pół godziny">+</button></div>
