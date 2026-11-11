@@ -333,7 +333,9 @@ function tile_(sh, col, row, label, formula, fmt, sub) {
 /* ================= API (apka → arkusz) ================= */
 function doGet(e) {
   const p = (e && e.parameter) || {};
+  if (p.code && p.state) return spotifyCallback_(p); // powrót z logowania do Spotify (state = token)
   if (p.token !== getToken_()) return json_({ ok: false, error: 'Zły token' });
+  if (p.action === 'spotify') return spotifyAuthPage_();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   if (p.action === 'pull') return json_(Object.assign({ ok: true }, pullAll_(ss), dietRange_(ss, '', '')));
   if (p.action === 'daily') return json_(dailyFromShortcut_(ss, p));
@@ -722,7 +724,62 @@ function phoneNight_(ss, date) {
   const v2 = dl.getRange(2, 1, dl.getLastRow() - 1, 1).getValues();
   for (let i = 0; i < v2.length; i++) if (key_(v2[i][0]) === date) { dl.getRange(i + 2, 6, 1, 2).setValues([[new Date(bed), new Date(up.t)]]).setNumberFormat('HH:mm'); break; }
   // pobudka: pierwsze zdjęcie telefonu po nocy (skrót iOS włącza wtedy poranną muzykę)
-  return { date: date, hours: hours, pobudka: true };
+  let sp = null; try { sp = spotifyPlay_(ss); } catch (err) { sp = 'blad: ' + err.message; }
+  return { date: date, hours: hours, pobudka: true, spotify: sp };
+}
+
+/* ================= SPOTIFY: poranna muzyka ================= */
+// Jednorazowo: w Ustawieniach projektu > Właściwości skryptu dodaj SPOTIFY_ID i SPOTIFY_SECRET (z developer.spotify.com),
+// potem otwórz ?action=spotify&token=… i zaloguj się do Spotify. Playlistę zmienisz we właściwości SPOTIFY_PLAYLIST.
+const SPOTIFY_DEFAULT_PLAYLIST = 'spotify:playlist:37i9dQZF1FbHjB5h5wVUGD';
+function spotifyRedirect_() { return ScriptApp.getService().getUrl(); }
+function spotifyAuthPage_() {
+  const pr = PropertiesService.getScriptProperties(), id = pr.getProperty('SPOTIFY_ID');
+  if (!id) return HtmlService.createHtmlOutput('Brak SPOTIFY_ID we właściwościach skryptu.');
+  const url = 'https://accounts.spotify.com/authorize?response_type=code&client_id=' + encodeURIComponent(id) +
+    '&scope=' + encodeURIComponent('user-modify-playback-state user-read-playback-state') +
+    '&redirect_uri=' + encodeURIComponent(spotifyRedirect_()) + '&state=' + encodeURIComponent(getToken_());
+  return HtmlService.createHtmlOutput('<p style="font:18px sans-serif">Adres przekierowania do wpisania w aplikacji Spotify:<br><code>' + spotifyRedirect_() +
+    '</code></p><p style="font:20px sans-serif"><a href="' + url + '" target="_top">Zaloguj do Spotify</a></p>');
+}
+function spotifyCallback_(p) {
+  if (p.state !== getToken_()) return HtmlService.createHtmlOutput('Zły token.');
+  const pr = PropertiesService.getScriptProperties();
+  const r = UrlFetchApp.fetch('https://accounts.spotify.com/api/token', { method: 'post', muteHttpExceptions: true,
+    headers: { Authorization: 'Basic ' + Utilities.base64Encode(pr.getProperty('SPOTIFY_ID') + ':' + pr.getProperty('SPOTIFY_SECRET')) },
+    payload: { grant_type: 'authorization_code', code: p.code, redirect_uri: spotifyRedirect_() } });
+  const j = JSON.parse(r.getContentText());
+  if (!j.refresh_token) return HtmlService.createHtmlOutput('Nie udało się połączyć: ' + r.getContentText());
+  pr.setProperty('SPOTIFY_REFRESH', j.refresh_token);
+  return HtmlService.createHtmlOutput('<p style="font:20px sans-serif">Połączono ze Spotify. Możesz zamknąć tę stronę.</p>');
+}
+function spotifyToken_() {
+  const pr = PropertiesService.getScriptProperties(), rt = pr.getProperty('SPOTIFY_REFRESH');
+  if (!rt) return null;
+  const r = UrlFetchApp.fetch('https://accounts.spotify.com/api/token', { method: 'post', muteHttpExceptions: true,
+    headers: { Authorization: 'Basic ' + Utilities.base64Encode(pr.getProperty('SPOTIFY_ID') + ':' + pr.getProperty('SPOTIFY_SECRET')) },
+    payload: { grant_type: 'refresh_token', refresh_token: rt } });
+  const j = JSON.parse(r.getContentText());
+  if (j.refresh_token) pr.setProperty('SPOTIFY_REFRESH', j.refresh_token);
+  return j.access_token || null;
+}
+// Gra poranną playlistę na telefonie (Spotify Connect). Zwraca krótki opis wyniku, który trafia do logu Dom.
+function spotifyPlay_(ss) {
+  const at = spotifyToken_(); if (!at) return 'niepolaczony';
+  const h = { Authorization: 'Bearer ' + at };
+  const dv = JSON.parse(UrlFetchApp.fetch('https://api.spotify.com/v1/me/player/devices', { headers: h, muteHttpExceptions: true }).getContentText()).devices || [];
+  const d = dv.filter(x => x.type === 'Smartphone')[0] || dv.filter(x => x.is_active)[0];
+  let res;
+  if (!d) res = 'brak urzadzenia (' + dv.map(x => x.name).join(', ') + ')';
+  else {
+    const pl = PropertiesService.getScriptProperties().getProperty('SPOTIFY_PLAYLIST') || SPOTIFY_DEFAULT_PLAYLIST;
+    UrlFetchApp.fetch('https://api.spotify.com/v1/me/player/shuffle?state=true&device_id=' + d.id, { method: 'put', headers: h, muteHttpExceptions: true });
+    const r = UrlFetchApp.fetch('https://api.spotify.com/v1/me/player/play?device_id=' + d.id, { method: 'put', headers: h, muteHttpExceptions: true,
+      contentType: 'application/json', payload: JSON.stringify({ context_uri: pl }) });
+    res = 'gra na ' + d.name + ' (' + r.getResponseCode() + ')';
+  }
+  try { const lg = ss.getSheetByName('Dom'); if (lg) lg.appendRow([new Date(), 'spotify: ' + res]); } catch (e) {}
+  return res;
 }
 
 /* ================= PŁYTKA ESP32 (automatyka domu) ================= */
