@@ -10,7 +10,19 @@ try:
 except ImportError:
     import urequests as requests
 
-VERSION = '1.0.22'
+# Biblioteka requests przy przekierowaniu (Apps Script zawsze przekierowuje) woła sama siebie bez limitu czasu,
+# przez co zapytanie potrafi zawisnąć na zawsze. Podmieniamy funkcję tak, by limit był zawsze ustawiony.
+if hasattr(requests, 'request'):
+    _req_orig = requests.request
+
+    def _req_timeout(*a, **k):
+        if len(a) < 8 and not k.get('timeout'):
+            k['timeout'] = 20
+        return _req_orig(*a, **k)
+
+    requests.request = _req_timeout
+
+VERSION = '1.0.23'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
