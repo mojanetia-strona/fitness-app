@@ -724,7 +724,7 @@ function phoneNight_(ss, date) {
   const v2 = dl.getRange(2, 1, dl.getLastRow() - 1, 1).getValues();
   for (let i = 0; i < v2.length; i++) if (key_(v2[i][0]) === date) { dl.getRange(i + 2, 6, 1, 2).setValues([[new Date(bed), new Date(up.t)]]).setNumberFormat('HH:mm'); break; }
   // pobudka: pierwsze zdjęcie telefonu po nocy (skrót iOS włącza wtedy poranną muzykę)
-  let sp = null; try { sp = spotifyPlay_(ss); } catch (err) { sp = 'blad: ' + err.message; }
+  let sp = null; try { sp = morningMusic_(ss); } catch (err) { sp = 'blad: ' + err.message; }
   return { date: date, hours: hours, pobudka: true, spotify: sp };
 }
 
@@ -733,7 +733,7 @@ function phoneNight_(ss, date) {
 // potem otwórz ?action=spotify&token=… i zaloguj się do Spotify. Playlistę zmienisz we właściwości SPOTIFY_PLAYLIST.
 const SPOTIFY_DEFAULT_PLAYLIST = 'spotify:playlist:37i9dQZF1FbHjB5h5wVUGD';
 // Test z edytora: wybierz testSpotify i kliknij Uruchom (wynik w logu wykonania i w zakładce Dom).
-function testSpotify() { Logger.log(spotifyPlay_(SpreadsheetApp.getActiveSpreadsheet())); }
+function testSpotify() { Logger.log(morningMusic_(SpreadsheetApp.getActiveSpreadsheet())); }
 function spotifyRedirect_() { return ScriptApp.getService().getUrl(); }
 function spotifyAuthPage_() {
   const pr = PropertiesService.getScriptProperties(), id = pr.getProperty('SPOTIFY_ID');
@@ -765,12 +765,22 @@ function spotifyToken_() {
   if (j.refresh_token) pr.setProperty('SPOTIFY_REFRESH', j.refresh_token);
   return j.access_token || null;
 }
+// Poranek: Samsung (MacroDroid, webhook z właściwości SAMSUNG_HOOK) wznawia Spotify, potem arkusz przełącza na playlistę.
+function morningMusic_(ss) {
+  const hook = PropertiesService.getScriptProperties().getProperty('SAMSUNG_HOOK');
+  if (hook) {
+    try { UrlFetchApp.fetch(hook, { muteHttpExceptions: true }); } catch (e) {}
+    for (let i = 0; i < 6; i++) { Utilities.sleep(3000); const r = spotifyPlay_(ss, true); if (r.indexOf('gra na') === 0) return r; }
+    return spotifyPlay_(ss);
+  }
+  return spotifyPlay_(ss);
+}
 // Gra poranną playlistę na telefonie (Spotify Connect). Zwraca krótki opis wyniku, który trafia do logu Dom.
-function spotifyPlay_(ss) {
+function spotifyPlay_(ss, quiet) {
   const at = spotifyToken_(); if (!at) return 'niepolaczony';
   const h = { Authorization: 'Bearer ' + at };
   const dv = JSON.parse(UrlFetchApp.fetch('https://api.spotify.com/v1/me/player/devices', { headers: h, muteHttpExceptions: true }).getContentText()).devices || [];
-  const d = dv.filter(x => x.type === 'Smartphone')[0] || dv.filter(x => x.is_active)[0];
+  const d = dv.filter(x => x.is_active)[0] || dv.filter(x => x.type === 'Smartphone')[0];
   let res;
   if (!d) res = 'brak urzadzenia (' + dv.map(x => x.name).join(', ') + ')';
   else {
@@ -780,7 +790,7 @@ function spotifyPlay_(ss) {
       contentType: 'application/json', payload: JSON.stringify({ context_uri: pl }) });
     res = 'gra na ' + d.name + ' (' + r.getResponseCode() + ')';
   }
-  try { const lg = ss.getSheetByName('Dom'); if (lg) lg.appendRow([new Date(), 'spotify: ' + res]); } catch (e) {}
+  if (!quiet || res.indexOf('gra na') === 0) try { const lg = ss.getSheetByName('Dom'); if (lg) lg.appendRow([new Date(), 'spotify: ' + res]); } catch (e) {}
   return res;
 }
 
