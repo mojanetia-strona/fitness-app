@@ -708,6 +708,7 @@ function phoneEvent_(ss, e) {
 /* Budziki z kalendarza: każde jutrzejsze wydarzenie z godziną (bez całodniowych i odrzuconych)
    dostaje budzik 2 h wcześniej. Skrót „Ładowarka ON” ustawia je w iPhonie. */
 const ALARM_BEFORE_MIN = 120;
+const ALARM_SKIP_CALENDARS = ['Zadania', 'Święta w Polsce'];
 function calendarAlarms_(now, hr) {
   try {
     const day = new Date(now.getTime() + (hr < 4 ? 0 : 864e5));
@@ -715,6 +716,8 @@ function calendarAlarms_(now, hr) {
     const from = new Date(ymd + 'T00:00:00' + tzOffset_(day)), to = new Date(from.getTime() + 864e5);
     const seen = {}, out = [];
     CalendarApp.getAllCalendars().forEach(cal => {
+      // kalendarz „Zadania” to powtarzalne przypominajki (trafiają do Google Tasks), nie spotkania: bez budzików
+      if (ALARM_SKIP_CALENDARS.indexOf(cal.getName()) >= 0) return;
       cal.getEvents(from, to).forEach(ev => {
         if (ev.isAllDayEvent()) return;
         try { if (ev.getMyStatus() === CalendarApp.GuestStatus.NO) return; } catch (x) {}
