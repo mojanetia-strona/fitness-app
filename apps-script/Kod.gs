@@ -698,6 +698,8 @@ function phoneEvent_(ss, e) {
   const now = new Date(); log.appendRow([now, e === 'down' ? 'odłożony' : 'zdjęty']);
   const hr = Number(Utilities.formatDate(now, TZ, 'H'));
   if (e === 'up' && hr >= 4 && hr < 13) return Object.assign({ ok: true }, phoneNight_(ss, Utilities.formatDate(now, TZ, 'yyyy-MM-dd')));
+  // noc: odłożenie po 21:00 (skrót iOS ustawia wtedy Spotify jako ostatnio grającą aplikację na poranek)
+  if (e === 'down' && (hr >= 21 || hr < 4)) return { ok: true, noc: true };
   return { ok: true };
 }
 function phoneNight_(ss, date) {
