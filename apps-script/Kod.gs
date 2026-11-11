@@ -719,7 +719,8 @@ function phoneNight_(ss, date) {
   upsertDaily_(ss, date, { sleep: hours }, 'telefon');
   const v2 = dl.getRange(2, 1, dl.getLastRow() - 1, 1).getValues();
   for (let i = 0; i < v2.length; i++) if (key_(v2[i][0]) === date) { dl.getRange(i + 2, 6, 1, 2).setValues([[new Date(bed), new Date(up.t)]]).setNumberFormat('HH:mm'); break; }
-  return { date: date, hours: hours };
+  // pobudka: pierwsze zdjęcie telefonu po nocy (skrót iOS włącza wtedy poranną muzykę)
+  return { date: date, hours: hours, pobudka: true };
 }
 
 /* ================= PŁYTKA ESP32 (automatyka domu) ================= */
