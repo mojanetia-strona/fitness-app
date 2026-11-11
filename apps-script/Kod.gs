@@ -732,6 +732,8 @@ function phoneNight_(ss, date) {
 // Jednorazowo: w Ustawieniach projektu > Właściwości skryptu dodaj SPOTIFY_ID i SPOTIFY_SECRET (z developer.spotify.com),
 // potem otwórz ?action=spotify&token=… i zaloguj się do Spotify. Playlistę zmienisz we właściwości SPOTIFY_PLAYLIST.
 const SPOTIFY_DEFAULT_PLAYLIST = 'spotify:playlist:37i9dQZF1FbHjB5h5wVUGD';
+// Test z edytora: wybierz testSpotify i kliknij Uruchom (wynik w logu wykonania i w zakładce Dom).
+function testSpotify() { Logger.log(spotifyPlay_(SpreadsheetApp.getActiveSpreadsheet())); }
 function spotifyRedirect_() { return ScriptApp.getService().getUrl(); }
 function spotifyAuthPage_() {
   const pr = PropertiesService.getScriptProperties(), id = pr.getProperty('SPOTIFY_ID');
