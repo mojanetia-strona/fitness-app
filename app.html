@@ -653,6 +653,8 @@ V.weight = () => {
   h+=`<h3>Wpisy</h3><div class="panel list">${ws.slice(-12).reverse().map(w=>`<div class="li"><span class="d">${fD(w.date)}</span><span class="v">${fN(w.kg,2)} kg</span><button class="x" data-a="delWeight" data-v="${w.date}" data-confirm="1">Usuń</button></div>`).join('')||'<div class="empty">Brak wpisów. Zapisz pierwszą wagę powyżej.</div>'}</div>`;
   return h;
 };
+function fH(h){ if(h==null||h==='') return ''; const m=Math.round(Number(h)*60); return Math.floor(m/60)+':'+String(m%60).padStart(2,'0'); }
+function pH(v){ v=String(v||'').trim(); const m=v.match(/^(\d{1,2})\s*[:.;]\s*(\d{2})$/); if(m&&v.includes(':')) return +m[1]+(+m[2])/60; return num(v); }
 function sleepOf(d){ return S.sleep[d]!=null?S.sleep[d]:(S.diet.daily[d]&&S.diet.daily[d].sleep!=null?S.diet.daily[d].sleep:null); }
 /* ---- badania ---- */
 const LAB_PANEL=[{g:'morfologia',n:'Morfologia',m:6},{g:'lipidogram',n:'Lipidogram',m:6},{g:'glukoza',n:'Glukoza',m:6},{g:'watroba',n:'Wątroba (ALT, AST, GGTP)',m:6},
@@ -724,16 +726,16 @@ function sleepPanel(){
   const as=a(days.map(sleepOf).filter(x=>x!=null&&x!=='')), at=a(days.map(x=>S.diet.daily[x]&&S.diet.daily[x].steps).filter(x=>x!=null&&x!==''));
   const recent=days.filter(x=>sleepOf(x)!=null).slice(0,7);
   const ph=phoneNight(d); const confirmed=S.sleep[d]!=null;
-  const phTxt=ph?`<div class="phn"><span>Odłożony: <b>${ph.bedT}</b> · Zdjęty: <b>${ph.wakeT}</b> · −20 min = <b>${fN(ph.h)} h</b></span></div>`:'';
+  const phTxt=ph?`<div class="phn"><span>Odłożony: <b>${ph.bedT}</b> · Zdjęty: <b>${ph.wakeT}</b> · −20 min = <b>${fH(ph.h)}</b></span></div>`:'';
   return `<h3>Sen</h3><div class="panel"><p class="note" style="margin-top:0">${ph?'Sen zapisuje się sam z telefonu.':'Sen zapisuje się sam, gdy telefon leży w nocy na ładowarce. Bez tego możesz wpisać go tutaj.'}</p>
     <div class="grid2"><div class="field"><label class="label" for="sdate">Dzień (rano po nocy)</label><input type="date" id="sdate" value="${d}" data-sdate="1"></div><div></div></div>
-    <div class="row mt" style="flex-wrap:nowrap"><button class="step" data-a="sstep" data-v="-0.5" aria-label="Minus pół godziny">−</button><input id="wsleep" inputmode="decimal" value="${cur!=null?fN(cur):''}" placeholder="${fN(lastSleep()??8)}" aria-label="Sen w godzinach" style="flex:1;min-width:0;height:60px;border:1px solid var(--line);text-align:center;font:700 30px var(--f-body);color:var(--navy)"><button class="step" data-a="sstep" data-v="0.5" aria-label="Plus pół godziny">+</button></div>
+    <div class="row mt" style="flex-wrap:nowrap"><button class="step" data-a="sstep" data-v="-0.5" aria-label="Minus pół godziny">−</button><input id="wsleep" inputmode="text" value="${cur!=null?fH(cur):''}" placeholder="${fH(lastSleep()??8)}" aria-label="Sen w godzinach" style="flex:1;min-width:0;height:60px;border:1px solid var(--line);text-align:center;font:700 30px var(--f-body);color:var(--navy)"><button class="step" data-a="sstep" data-v="0.5" aria-label="Plus pół godziny">+</button></div>
     ${phTxt}
     <button class="btn ${ph?'ghost':'primary'} block mt" data-a="saveSleep">Zapisz sen</button></div>
-  <div class="strip mt"><div><div class="label">Sen śr. 7 dni</div><div class="v">${as==null?'–':fN(as)}<small>h</small></div></div>
+  <div class="strip mt"><div><div class="label">Sen śr. 7 dni</div><div class="v">${as==null?'–':fH(as)}</div></div>
     <div><div class="label">Wstajesz śr.</div><div class="v" style="font-size:22px">${aw==null?'–':Math.floor(aw/60)+':'+String(aw%60).padStart(2,'0')}</div></div>
     <div><div class="label">Kroki śr.</div><div class="v" style="font-size:22px">${at==null?'–':Math.round(at).toLocaleString('pl-PL')}</div></div></div>
-  ${recent.length?`<div class="panel list mt">${recent.map(x=>`<div class="li"><span class="d">${fD(x)}</span><span class="v">${sleepOf(x)!=null?fN(sleepOf(x))+' h':'–'}</span></div>`).join('')}</div>`:''}`;
+  ${recent.length?`<div class="panel list mt">${recent.map(x=>`<div class="li"><span class="d">${fD(x)}</span><span class="v">${sleepOf(x)!=null?fH(sleepOf(x)):'–'}</span></div>`).join('')}</div>`:''}`;
 }
 V.measure = () => S.measTab==='badania' ? labsView() : V.measureObw();
 V.measureObw = () => {
@@ -1027,12 +1029,12 @@ const A = {
     if(!kg||kg<30||kg>250) return flash($('#wkg'));
     S.weights=S.weights.filter(w=>w.date!==date); S.weights.push({date,kg}); enqueue('weight',{date,kg},'wt:'+date);
     render(); toast('Zapisano wagę: '+fN(kg,2)+' kg'); },
-  saveSleep(){ const date=$('#sdate').value||today(); const sl=num($('#wsleep').value);
+  saveSleep(){ const date=$('#sdate').value||today(); const sl=pH($('#wsleep').value);
     if(sl==null || sl<=0 || sl>16) return flash($('#wsleep'));
     S.sleep[date]=sl; enqueue('daily',{date, sleep:sl},'sl:'+date);
-    sleepStarDate=null; render(); toast('Zapisano sen: '+fN(sl)+' h'); },
-  sread(b){ const d=$('#sdate').value||today(); const ph=phoneNight(d); if(!ph) return; const el=$('#wsleep'); el.value=fN(Math.max(0,Math.round((ph.h-parseFloat(b.dataset.v))*10)/10)); A.saveSleep(); },
-  sstep(b){ const el=$('#wsleep'); const v=(num(el.value)??(lastSleep()??8))+parseFloat(b.dataset.v); el.value=fN(Math.max(0,Math.min(16,v))); },
+    sleepStarDate=null; render(); toast('Zapisano sen: '+fH(sl)); },
+  sread(b){ const d=$('#sdate').value||today(); const ph=phoneNight(d); if(!ph) return; const el=$('#wsleep'); el.value=fH(Math.max(0,ph.h-parseFloat(b.dataset.v))); A.saveSleep(); },
+  sstep(b){ const el=$('#wsleep'); const v=(pH(el.value)??(lastSleep()??8))+parseFloat(b.dataset.v); el.value=fH(Math.max(0,Math.min(16,v))); },
   delWeight(b){ const d=b.dataset.v; S.weights=S.weights.filter(w=>w.date!==d); enqueue('delWeight',{date:d},'wt:'+d); render(); },
   saveMeasure(){ const date=$('#mdate').value||today(); const m={date}; let any=false;
     MEAS.forEach(x=>{ const v=num($('#m-'+x.k).value); if(v){ m[x.k]=v; any=true; } }); const bf=num($('#mbf').value); if(bf){ m.bf=bf; any=true; }
