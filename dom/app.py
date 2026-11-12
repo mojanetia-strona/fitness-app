@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.31'
+VERSION = '1.0.32'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -32,7 +32,7 @@ PLAN = {
     'bed_night': 17.0,      # sypialnia w nocy (do spania chłodniej)
     'bed_home': 20.0,       # sypialnia, gdy w niej jestem (Pon-Pt od 18:00, weekend po wstaniu); głowica przy grzejniku, korekta -2
     'bed_morning': 22.0,    # sypialnia przed pobudką (cieplej na wstanie)
-    'bed_pre_min': 30,      # ile minut przed pobudką grzać sypialnię
+    'bed_pre_min': 60,      # ile minut przed pobudką grzać sypialnię (tak samo jak salon)
     'bed_after_min': 30,    # ile minut po zdjęciu telefonu wyłączyć sypialnię
     'salon_pre_min': 60,    # (nieużywane) nawilżacz i oczyszczacz włączają się dopiero po zdjęciu telefonu
     'salon_heat_pre_min': 60,  # ile minut przed pobudką grzać salon na dzień
