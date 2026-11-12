@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.34'
+VERSION = '1.0.35'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -452,8 +452,8 @@ def ble_on():
     b = bluetooth.BLE()
     b.active(True)
     b.irq(ble_irq)
-    # mały wycinek czasu radia (30 ms co 300 ms), żeby nie zagłuszać Wi-Fi
-    b.gap_scan(0, 300000, 30000, True)
+    # wycinek czasu radia (50 ms co 200 ms): czujniki okien nadają krótko, a Wi-Fi dalej ma 75% czasu
+    b.gap_scan(0, 200000, 50000, True)
     BLE[0] = b
 
 
@@ -471,7 +471,7 @@ def ble_resume():
     scale['boost'] = False  # scale_tick w razie potrzeby znowu włączy ciągły skan
     if BLE[0]:
         try:
-            BLE[0].gap_scan(0, 300000, 30000, True)
+            BLE[0].gap_scan(0, 200000, 50000, True)
         except Exception as e:
             print('ble resume err', e)
 
