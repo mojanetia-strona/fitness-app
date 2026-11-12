@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.32'
+VERSION = '1.0.33'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -281,6 +281,44 @@ def dev_set(name, key, value, label=None):
 scale = {'last_kg': None, 'last_sent': 0, 'pending': None, 'pending_at': 0, 'seen': 0, 'boost': False, 'logged': 0}
 
 
+# ---------- czujniki okien (Shelly BLU Door/Window, BTHome v2, bez szyfrowania) ----------
+win = {}  # mac -> {'open': 0/1, 'bat': %, 'pid': nr pakietu, 't': czas}
+BTH_LEN = {0x00: 1, 0x01: 1, 0x05: 3, 0x2D: 1, 0x3A: 1, 0x3F: 2, 0x02: 2, 0x03: 2, 0x0C: 2, 0x21: 1}
+
+
+def bthome(addr, p):
+    if not p or p[0] & 0x01:  # zaszyfrowane: pomijamy
+        return
+    d, j = {}, 1
+    while j < len(p):
+        oid = p[j]
+        n = BTH_LEN.get(oid)
+        if n is None or j + 1 + n > len(p):
+            break
+        d[oid] = p[j + 1]
+        j += 1 + n
+    if 0x2D not in d:
+        return
+    mac = ':'.join('%02X' % b for b in addr)
+    w = win.get(mac) or {}
+    w['open'] = d[0x2D]
+    w['bat'] = d.get(0x01, w.get('bat'))
+    w['t'] = time.time()
+    win[mac] = w
+
+
+win_seen = {}  # mac -> ostatnio zalogowany stan
+
+
+def win_tick():
+    for mac, w in list(win.items()):
+        if win_seen.get(mac) != w['open']:
+            first = mac not in win_seen
+            win_seen[mac] = w['open']
+            log('okno %s %s%s (bateria %s%%)' % (mac, 'OTWARTE' if w['open'] else 'zamkniete',
+                                                 ' [nowy czujnik]' if first else '', w.get('bat')))
+
+
 def ble_irq(event, data):
     if event != 5:  # _IRQ_SCAN_RESULT
         return
@@ -292,6 +330,8 @@ def ble_irq(event, data):
             if ln == 0:
                 break
             typ = adv[i + 1]
+            if typ == 0x16 and ln >= 4 and adv[i + 2] == 0xD2 and adv[i + 3] == 0xFC:
+                bthome(bytes(data[1]), adv[i + 4:i + 1 + ln])
             if typ == 0x16 and ln >= 13 and adv[i + 2] == 0x1D and adv[i + 3] == 0x18:
                 p = adv[i + 4:i + 1 + ln]
                 ctrl = p[0]
@@ -734,6 +774,7 @@ def run():
                 tick_rules(sync, q)
                 save_state()
             scale_tick()
+            win_tick()
             if log_buf and (time.time() - last_report > 120 or len(log_buf) > 8):
                 last_report = time.time()
                 flush_log()
