@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.33'
+VERSION = '1.0.34'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -45,10 +45,7 @@ PLAN = {
     'rh_target': 50,        # cel stałej wilgotności w salonie
     'bed_rh_hi': 55,        # sypialnia: przy tylu % nawilżacz pauza
     'bed_rh_lo': 47,        # sypialnia: przy tylu % nawilżacz wraca
-    'airing': False,        # tryb wietrzenia wyłączony (wróci z czujnikami okien)
-    'air_co2_drop': 100,    # wietrzenie: spadek CO2 w 3 min (ppm)
-    'air_t_drop': 0.6,      # wietrzenie: spadek temperatury w 3 min (°C)
-    'air_max_min': 20,      # wietrzenie: najdłużej tyle minut pauzy
+    'air_max_min': 90,      # wietrzenie: po tylu minutach bez wiadomości z czujnika wracamy do normy (bezpiecznik)
     'ext_temp': True,       # salon: temperatura z Qingpinga do głowicy
     'scale_min': 45.0, 'scale_max': 150.0,
 }
@@ -192,11 +189,19 @@ def trv_call(trv_id, method, params):
     raise last
 
 
-def trv_target(name, temp):
+def trv_target(name, temp, force=False):
     tid = cfg.get('trv', {}).get(name)
     if tid is None:
         return
     temp = round(float(temp) * 2) / 2
+    r = 's' if name == 'salon' else 'b'
+    rec = air(r)
+    if rec and not force:
+        rec = dict(rec)
+        rec['trv'] = temp
+        air_put(r, rec)
+        log('grzejnik %s: okno otwarte, %s po zamknieciu' % (name, temp))
+        return
     try:
         trv_call(tid, 'TRV.SetTarget', {'id': 0, 'target_C': temp})
         state['trv_' + name] = temp
@@ -266,6 +271,17 @@ def dev_set(name, key, value, label=None):
     d = dev.get(name)
     if not d:
         return False
+    if key == 'on' and not AIR_SELF[0]:
+        r = dev_room(name)
+        rec = air(r) if r else None
+        if rec:
+            rec = dict(rec)
+            rec['on'] = dict(rec['on'])
+            rec['on'][name] = bool(value)
+            air_put(r, rec)
+            if value:
+                log('%s: okno otwarte, wlacze po zamknieciu' % name)
+                return True
     try:
         s, p = P[key]
         d.set(s, p, value)
@@ -308,6 +324,64 @@ def bthome(addr, p):
 
 
 win_seen = {}  # mac -> ostatnio zalogowany stan
+WIN_ROOM = {'F4:01:CC:22:2E:77': 's', 'F4:01:CC:1B:C2:E8': 'b'}  # s = salon, b = sypialnia
+ROOM_DEV = {'s': ('salon_hum', 'salon_pur'), 'b': ('bed_hum',)}
+ROOM_TRV = {'s': 'salon', 'b': 'bed'}
+ROOM_NAME = {'s': 'salon', 'b': 'sypialnia'}
+ROOM_COLD = {'s': 5, 'b': 4}
+
+
+AIR_SELF = [False]  # True: to samo wietrzenie włącza/wyłącza, bez zapamiętywania
+
+
+def air(room):
+    return (state.get('air') or {}).get(room)
+
+
+def air_put(room, rec):
+    a = dict(state.get('air') or {})
+    a[room] = rec
+    state['air'] = a
+
+
+def dev_room(name):
+    for r, ds in ROOM_DEV.items():
+        if name in ds:
+            return r
+
+
+def air_start(room):
+    rec = {'at': time.time(), 'on': {}, 'trv': state.get('trv_' + ROOM_TRV[room])}
+    for d in ROOM_DEV[room]:
+        on, = dev_get(d, ['on'])
+        rec['on'][d] = bool(on)
+    air_put(room, rec)
+    log('okno otwarte: %s, wylaczam i skrecam grzejnik' % ROOM_NAME[room])
+    AIR_SELF[0] = True
+    for d in ROOM_DEV[room]:
+        if rec['on'][d]:
+            dev_set(d, 'on', False)
+    AIR_SELF[0] = False
+    trv_target(ROOM_TRV[room], ROOM_COLD[room], True)
+
+
+def air_stop(room, why):
+    rec = air(room) or {}
+    air_put(room, None)
+    log('okno %s: %s, przywracam' % (why, ROOM_NAME[room]))
+    AIR_SELF[0] = True
+    for d, on in (rec.get('on') or {}).items():
+        if on:
+            dev_set(d, 'on', True)
+    AIR_SELF[0] = False
+    t = rec.get('trv')
+    if t is None:  # nie znamy celu sprzed otwarcia (np. po restarcie): bierzemy z planu na tę porę
+        m, night = mins(), state.get('asleep')
+        if room == 's':
+            t = PLAN['salon_night'] if night else PLAN['salon_day']
+        else:
+            t = PLAN['bed_night'] if night else (PLAN['bed_home'] if is_weekend() or m >= 1080 else PLAN['bed_day'])
+    trv_target(ROOM_TRV[room], t)
 
 
 def win_tick():
@@ -315,8 +389,25 @@ def win_tick():
         if win_seen.get(mac) != w['open']:
             first = mac not in win_seen
             win_seen[mac] = w['open']
-            log('okno %s %s%s (bateria %s%%)' % (mac, 'OTWARTE' if w['open'] else 'zamkniete',
-                                                 ' [nowy czujnik]' if first else '', w.get('bat')))
+            if first or not WIN_ROOM.get(mac):
+                log('okno %s %s%s (bateria %s%%)' % (mac, 'OTWARTE' if w['open'] else 'zamkniete',
+                                                     ' [nowy czujnik]' if first else '', w.get('bat')))
+        room = WIN_ROOM.get(mac)
+        if room:
+            if w['open'] and not air(room):
+                air_start(room)
+            elif not w['open'] and air(room):
+                air_stop(room, 'zamkniete')
+    for room in ('s', 'b'):
+        rec = air(room)
+        if rec and time.time() - rec['at'] > PLAN['air_max_min'] * 60:
+            fresh = [w for m, w in win.items() if WIN_ROOM.get(m) == room and w['open'] and time.time() - w['t'] < 600]
+            if fresh:
+                rec = dict(rec)
+                rec['at'] = time.time()
+                air_put(room, rec)
+            else:
+                air_stop(room, 'bez sygnalu z czujnika')
 
 
 def ble_irq(event, data):
@@ -433,7 +524,6 @@ def scale_tick():
 
 
 # ---------- logika ----------
-hist = []  # (czas, co2, temp) z ostatnich minut
 
 
 def phone_asleep(ph):
@@ -466,7 +556,7 @@ def day_key():
     return '%04d%02d%02d' % (tm[0], tm[1], tm[2])
 
 
-SAVE_KEYS = ('asleep', 'bed_off_at', 'bed_eve', 'night_on', 'bed_pause')
+SAVE_KEYS = ('asleep', 'bed_off_at', 'bed_eve', 'night_on', 'bed_pause', 'air')
 
 
 def save_state():
@@ -474,12 +564,13 @@ def save_state():
     for k in state:
         if k.startswith('once_'):
             d[k] = state[k]
-    if d == state.get('_saved'):
+    js = json.dumps(d)
+    if js == state.get('_saved'):
         return
     try:
         with open('state.json', 'w') as f:
             json.dump({'t': time.time(), 's': d}, f)
-        state['_saved'] = d
+        state['_saved'] = js
     except Exception as e:
         print('state save err', e)
 
@@ -490,7 +581,7 @@ def load_state():
             j = json.load(f)
         if time.time() - j.get('t', 0) < 12 * 3600:
             state.update(j['s'])
-            state['_saved'] = j['s']
+            state['_saved'] = json.dumps(j['s'])
             return True
     except Exception:
         pass
@@ -565,7 +656,7 @@ def tick_rules(sync, q):
             trv_target('bed', PLAN['bed_home'])
 
     # --- salon: moc nawilżacza według Qingpinga ---
-    if rh is not None and not state.get('airing') and not asleep:  # w nocy nie ruszamy trybu nocnego
+    if rh is not None and not air('s') and not asleep:  # w nocy nie ruszamy trybu nocnego
         on, mode = dev_get('salon_hum', ['on', 'sh_mode'])
         if on:
             if rh < PLAN['rh_low'] and mode != 2:
@@ -577,7 +668,7 @@ def tick_rules(sync, q):
     # --- sypialnia: nawilżacz sam przestrzeliwuje cel, więc pilnuje go płytka (jego własny czujnik) ---
     # włączony przeze mnie lub przez Google Home: przy >= 55% pauza (off), przy <= 47% z powrotem on (tylko gdy jestem w domu).
     # Wyłączony przeze mnie: nie ruszamy.
-    if not asleep and not state.get('airing') and time.time() - state.get('bed_chk', 0) > 120:
+    if not asleep and not air('b') and time.time() - state.get('bed_chk', 0) > 120:
         state['bed_chk'] = time.time()
         b_on, b_rh = dev_get('bed_hum', ['on', 'bh_rh'])
         if b_rh is not None:
@@ -608,80 +699,10 @@ def tick_rules(sync, q):
     if asleep:
         state['bed_pause'] = False
 
-    # --- bezpiecznik wietrzenia ---
-    if co2 is not None and t is not None:
-        hist.append((time.time(), co2, t))
-    while hist and time.time() - hist[0][0] > 400:
-        hist.pop(0)
-    if state.get('airing'):
-        el = time.time() - state['airing_at']
-        if el > PLAN['air_max_min'] * 60:
-            stop_airing('limit czasu')  # działa też, gdy Qingping chwilowo nie odpowiada
-        elif co2 is not None and t is not None and el > 180:
-            ref = [h for h in hist if 100 <= time.time() - h[0] <= 260]
-            if ref:
-                d_co2 = co2 - ref[0][1]
-                d_t = t - ref[0][2]
-                # okno zamknięte: CO2 znowu rośnie albo temperatura wraca / przestała spadać
-                if d_co2 >= 0 or d_t >= 0.1 or (d_co2 > -30 and d_t > -0.2):
-                    stop_airing('koniec (CO2 %+d, T %+.1f)' % (d_co2, d_t))
-    elif PLAN['airing'] and co2 is not None and t is not None:
-        ref = [h for h in hist if 100 <= time.time() - h[0] <= 260]
-        if ref:
-            d_co2 = co2 - ref[0][1]
-            d_t = t - ref[0][2]
-            if d_co2 <= -PLAN['air_co2_drop'] or d_t <= -PLAN['air_t_drop']:
-                start_airing(d_co2, d_t)
-
     # --- temperatura z Qingpinga do głowicy w salonie (co 5 min) ---
     if PLAN['ext_temp'] and t is not None and time.time() - state.get('ext_at', 0) > 300:
         state['ext_at'] = time.time()
         trv_ext('salon', t)
-
-
-def start_airing(dco2, dt):
-    hum_on, = dev_get('salon_hum', ['on'])
-    pur_on, = dev_get('salon_pur', ['on'])
-    bed_on, = dev_get('bed_hum', ['on'])
-    state['airing'] = {'hum': bool(hum_on), 'pur': bool(pur_on), 'bed': bool(bed_on),
-                       'trv': state.get('trv_salon'), 'trv_bed': state.get('trv_bed')}
-    state['airing_at'] = time.time()
-    try:
-        with open('airing.json', 'w') as f:
-            json.dump(state['airing'], f)
-    except Exception:
-        pass
-    log('wietrzenie start (CO2 %+d, T %+.1f)' % (dco2, dt))
-    if hum_on:
-        dev_set('salon_hum', 'on', False)
-    if pur_on:
-        dev_set('salon_pur', 'on', False)
-    if bed_on:
-        dev_set('bed_hum', 'on', False)
-    # grzejniki przykręcone, żeby nie grzały ulicy przy otwartym oknie
-    trv_target('salon', 5)
-    trv_target('bed', 4)
-
-
-def stop_airing(why):
-    a = state.get('airing') or {}
-    state['airing'] = None
-    try:
-        import os
-        os.remove('airing.json')
-    except Exception:
-        pass
-    log('wietrzenie %s' % why)
-    # przywróć tylko to, co chodziło przed wietrzeniem
-    if a.get('hum'):
-        dev_set('salon_hum', 'on', True)
-    if a.get('pur'):
-        dev_set('salon_pur', 'on', True)
-    if a.get('bed'):
-        dev_set('bed_hum', 'on', True)
-    trv_target('salon', a.get('trv') or PLAN['salon_day'])
-    if a.get('trv_bed'):
-        trv_target('bed', a['trv_bed'])
 
 
 def check_update():
@@ -730,12 +751,6 @@ def setup():
             log('oczyszczacz model %s' % state['pur_model'])
         except Exception as e:
             print('pur model err', e)
-    try:
-        with open('airing.json') as f:
-            state['airing'] = json.load(f)
-        stop_airing('przerwane restartem, przywracam')
-    except OSError:
-        pass
 
 
 def run():
