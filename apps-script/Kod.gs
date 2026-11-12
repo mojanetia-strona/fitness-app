@@ -845,6 +845,40 @@ function spotifyPlay_(ss, quiet) {
   return res;
 }
 
+/* Pobudka z wagi: jeśli rano (4-13) ważę się, a telefon wciąż leży na ładowarce od nocy, to ważenie liczy się jak zdjęcie telefonu
+   (zapis „zdjęty” ze źródłem „waga”). Liczy się to, co było pierwsze: późniejsze zdjęcie telefonu nic już nie powtarza. */
+function scaleWake_(ss) {
+  const now = new Date(), hr = Number(Utilities.formatDate(now, TZ, 'H'));
+  if (hr < 4 || hr >= 13) return false;
+  const log = ss.getSheetByName('Telefon'); if (!log || log.getLastRow() < 2) return false;
+  const last = log.getRange(log.getLastRow(), 1, 1, 2).getValues()[0];
+  if (!(last[0] instanceof Date) || last[1] !== 'odłożony') return false;
+  const today = Utilities.formatDate(now, TZ, 'yyyy-MM-dd'), d0 = toDate_(today).getTime();
+  if (last[0].getTime() < d0 - 6 * 36e5 || last[0].getTime() >= d0 + 4 * 36e5) return false; // odłożony na noc (wczoraj od 18:00 do 4:00)
+  log.appendRow([now, 'zdjęty', 'waga']);
+  try { const lg = ss.getSheetByName('Dom'); if (lg) lg.appendRow([now, 'pobudka z wagi (telefon jeszcze na ladowarce)']); } catch (e) {}
+  // sen i poranna muzyka w osobnym przebiegu, żeby płytka nie czekała na odpowiedź
+  ScriptApp.newTrigger('pobudkaZWagi').timeBased().after(1000).create();
+  return true;
+}
+function pobudkaZWagi() {
+  ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === 'pobudkaZWagi').forEach(t => ScriptApp.deleteTrigger(t));
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  phoneNight_(ss, Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd'));
+}
+
+/* Logi płytki (zakładka Dom): trzymamy 30 dni, sprzątanie raz na dobę. */
+const DOM_LOG_DAYS = 30;
+function domLogCleanup_(lg) {
+  const pr = PropertiesService.getScriptProperties(), today = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
+  if (pr.getProperty('DOM_CLEAN') === today) return;
+  pr.setProperty('DOM_CLEAN', today);
+  const n = lg.getLastRow() - 1; if (n < 1) return;
+  const limit = Date.now() - DOM_LOG_DAYS * 864e5, v = lg.getRange(2, 1, n, 1).getValues();
+  let old = 0; while (old < n && v[old][0] instanceof Date && v[old][0].getTime() < limit) old++;
+  if (old > 0) lg.deleteRows(2, old);
+}
+
 /* ================= PŁYTKA ESP32 (automatyka domu) ================= */
 // ?action=esp&token=…[&kg=82.4][&log=tekst]
 // Zwraca ostatnie zdarzenie ładowarki i typową godzinę zdjęcia telefonu (dni robocze / weekend, mediana z 21 dni).
@@ -857,11 +891,12 @@ function espSync_(ss, p) {
     const has = sh.getLastRow() > 1 && sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues().some(r => r[0] && key_(r[0]) === date);
     if (!has) { upsertByDate_(sh, date, [Math.round(kg * 100) / 100]); rewriteWeightFormulas_(sh); out.kg = Math.round(kg * 100) / 100; }
     else out.kg_skipped = Math.round(kg * 100) / 100;
+    if (scaleWake_(ss)) out.pobudka_waga = true;
   }
   if (p.log) {
     const lg = ss.getSheetByName('Dom') || (function () { const s = ss.insertSheet('Dom'); s.appendRow(['Czas', 'Wpis']); s.setFrozenRows(1); s.getRange('A:A').setNumberFormat('d mmm yyyy HH:mm'); return s; })();
     lg.appendRow([new Date(), String(p.log).slice(0, 500)]);
-    if (lg.getLastRow() > 3000) lg.deleteRows(2, lg.getLastRow() - 3000);
+    domLogCleanup_(lg);
   }
   const ev = rows_(ss, 'Telefon', 2).filter(r => r[0] instanceof Date).map(r => ({ t: r[0].getTime(), e: r[1] === 'odłożony' ? 'down' : 'up' }));
   if (ev.length) { const l = ev[ev.length - 1]; out.phone = { e: l.e, t: Utilities.formatDate(new Date(l.t), TZ, "yyyy-MM-dd'T'HH:mm:ss") }; }
