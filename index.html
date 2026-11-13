@@ -358,7 +358,8 @@ const LIB = [
 ];
 const MGROUPS = ['Klatka','Barki','Triceps','Plecy','Biceps','Nogi','Inne'];
 const CARDIO = ['Rower','Rower stacjonarny','Bieżnia','Bieganie','Orbitrek','Wioślarz','Spacer','Schody','Inne'];
-const IDLE_MIN = 15;
+const IDLE_MIN = 180; // awaryjnie: po 3 h bez dotknięcia apki trening kończy się sam (normalnie kończy go wyjście z siłowni albo przycisk)
+const RESUME_MIN = 90; // ten sam trening zaczęty ponownie w ciągu 90 min od końca = kontynuacja, nie nowy zapis
 const SLEEP_ADJ_MIN = 20; // stała korekta snu z telefonu // po tylu minutach bez dotknięcia apki trening kończy się sam
 const GOAL = {start:85, target:90.5, rateLo:0.2, rateHi:0.35};
 const DGOAL = {kcal:3300, p:170};
@@ -464,8 +465,35 @@ function buildSets(e){
 }
 function startWorkout(dayId){
   const d=DAY[dayId]; const now=Date.now();
+  const prev=S.workouts.filter(w=>w.dayId===dayId && w.end && now-w.end<RESUME_MIN*60000 && ymd(w.start)===ymd(now)).sort((a,b)=>b.end-a.end)[0];
+  if(prev){ resumeWorkout(prev); return; }
   S.active={id:uid(), dayId, start:now, last:now, ex:d.ex.map(e=>({exId:e.id, sets:buildSets(e)}))};
   S.summary=null; S.view='workout'; save(); render(); wake(true);
+}
+/* wznowienie zapisanego treningu: zrobione serie zostają, brakujące ćwiczenia z planu wracają */
+function resumeWorkout(w){
+  const d=DAY[w.dayId]; const now=Date.now();
+  S.workouts=S.workouts.filter(x=>x.id!==w.id);
+  const ex=[]; const used=new Set();
+  (d?d.ex:[]).forEach(pe=>{ const old=w.ex.find(e=>e.exId===pe.id); used.add(pe.id);
+    if(old){ const done=old.sets.map(s=>Object.assign({},s,{done:true})); const fill=buildSets(pe).slice(done.length).map(s=>Object.assign(s,{kg:done[done.length-1].kg})); ex.push({exId:pe.id, sets:done.concat(fill)}); }
+    else ex.push({exId:pe.id, sets:buildSets(pe)}); });
+  w.ex.forEach(e=>{ if(!used.has(e.exId)) ex.push({exId:e.exId, sets:e.sets.map(s=>Object.assign({},s,{done:true}))}); });
+  S.active={id:w.id, dayId:w.dayId, start:w.start, last:now, ex};
+  S.summary=null; S.view='workout'; save(); render(); wake(true); toast('Kontynuujesz trening z '+new Date(w.start).toTimeString().slice(0,5));
+}
+/* jednorazowo: sklej treningi rozbite przez stare auto-zamykanie (ten sam dzień i plan, przerwa < 90 min) */
+function mergeSplitWorkouts(){
+  if(S.mergedSplit2) return; S.mergedSplit2=true;
+  const ws=S.workouts.slice().sort((a,b)=>a.start-b.start);
+  for(let i=1;i<ws.length;i++){ const a=ws[i-1], b=ws[i];
+    if(a.dayId!==b.dayId || ymd(a.start)!==ymd(b.start) || b.start-a.end>RESUME_MIN*60000) continue;
+    b.ex.forEach(e=>{ const t=a.ex.find(x=>x.exId===e.exId); if(t) t.sets=t.sets.concat(e.sets); else a.ex.push(e); });
+    a.end=Math.max(a.end,b.end); delete a.auto;
+    S.workouts=S.workouts.filter(x=>x.id!==b.id); ws.splice(i,1); i--;
+    enqueue('delWorkout',{id:b.id},'w:'+b.id); enqueue('workout', workoutPayload(a), 'w:'+a.id);
+  }
+  save();
 }
 /* ostatnia aktywność: zaznaczona seria albo dotknięcie apki w trakcie treningu */
 function lastSetTs(a){ let t=0; a.ex.forEach(e=>e.sets.forEach(s=>{ if(s.done&&s.ts) t=Math.max(t,s.ts); })); return t; }
@@ -555,7 +583,7 @@ V.train = () => {
   h+=labReminder();
   if(S.demo) h+=`<div class="demo"><span><b>Dane przykładowe.</b> Tak będzie wyglądać po kilku tygodniach.</span><button data-a="clearDemo">Wyczyść</button></div>`;
   if(S.summary){ const s=S.summary;
-    h+=`<div class="summary"><h3>${esc(DAY[s.dayId].name)} zapisany</h3>${s.auto?`<p class="note" style="color:#B9C7D0;margin:0 0 6px">Zakończony automatycznie po ${IDLE_MIN} min bez aktywności. Czas liczony do ostatniej serii.</p>`:''}<div class="row note" style="color:#fff"><span class="num" style="font-weight:600">${s.min} min</span>·<span class="num" style="font-weight:600">${s.sets} serii</span>·<span class="num" style="font-weight:600">${fN(s.vol/1000,2)} t</span></div>
+    h+=`<div class="summary"><h3>${esc(DAY[s.dayId].name)} zapisany</h3>${s.auto?`<p class="note" style="color:#B9C7D0;margin:0 0 6px">Zakończony automatycznie po 3 h bez aktywności. Czas liczony do ostatniej serii.</p>`:''}<div class="row note" style="color:#fff"><span class="num" style="font-weight:600">${s.min} min</span>·<span class="num" style="font-weight:600">${s.sets} serii</span>·<span class="num" style="font-weight:600">${fN(s.vol/1000,2)} t</span></div>
       ${s.prs.length?'<div class="mt">'+s.prs.map(p=>`<div class="row" style="justify-content:space-between"><span>Rekord: ${esc(p.name)}</span><b class="delta" style="color:#00B8C7">+${fN(p.d)} kg e1RM</b></div>`).join('')+'</div>':''}
       <button class="btn ghost mt" data-a="dismissSummary">OK</button></div>`; }
   if(!S.settings.url && !S.demo) h+=`<div class="demo"><span><b>Apka nie jest połączona z arkuszem.</b> Treningi zapisują się tylko na telefonie.</span><button data-a="nav" data-v="settings">Połącz</button></div>`;
@@ -639,7 +667,7 @@ V.workout = () => {
   h+=swapFor==='add'?`<div class="ex">${swapPanel('add')}</div>`:`<button class="btn block" data-a="exAdd">+ Dodaj ćwiczenie</button>`;
   h+=`<p class="note" id="idle"></p>`;
   h+=`<div class="row mt"><button class="btn primary" style="flex:1" data-a="finish" data-confirm="1">Zakończ trening</button><button class="btn danger" data-a="discard" data-confirm="1">Odrzuć</button></div>
-    <p class="note">Wszystko zapisuje się na telefonie od razu. Synchronizacja z arkuszem idzie w tle, gdy jest internet. Po ${IDLE_MIN} min bez dotknięcia apki trening zakończy się sam, z czasem do ostatniej serii.</p>`;
+    <p class="note">Wszystko zapisuje się na telefonie od razu. Synchronizacja z arkuszem idzie w tle, gdy jest internet. Trening kończysz przyciskiem. Gdy zapomnisz, zakończy się sam po 3 h bez dotknięcia apki, z czasem do ostatniej serii. Wejście drugi raz w ten sam trening w ciągu 90 min kontynuuje go zamiast tworzyć nowy.</p>`;
   return h;
 };
 V.weight = () => {
@@ -1001,7 +1029,7 @@ function render(){
 }
 function rerenderCard(i){ const el=document.querySelector(`[data-card="${i}"]`); if(el) el.outerHTML=exCard(i); const a=S.active; if(a){ const c=$('#wkcount'); if(c) c.textContent=a.ex.reduce((n,e)=>n+e.sets.filter(s=>s.done).length,0)+'/'+a.ex.reduce((n,e)=>n+e.sets.length,0); } }
 function tickElapsed(){ const el=$('#elapsed'); if(el&&S.active) el.textContent=mmss((Date.now()-S.active.start)/1000);
-  const il=$('#idle'); if(il&&S.active){ const m=Math.floor(idleMs()/60000); il.textContent=m>=10?`Brak aktywności od ${m} min. Za ${IDLE_MIN-m} min zakończę trening automatycznie (dotknij czegokolwiek, żeby kontynuować).`:''; il.style.color=m>=10?'var(--warn)':''; } }
+  const il=$('#idle'); if(il&&S.active){ const m=Math.floor(idleMs()/60000); il.textContent=m>=IDLE_MIN-15?`Brak aktywności od ${m} min. Za ${IDLE_MIN-m} min zakończę trening automatycznie (dotknij czegokolwiek, żeby kontynuować).`:''; il.style.color=m>=IDLE_MIN-15?'var(--warn)':''; } }
 setInterval(()=>{ checkIdle(); tickElapsed(); tickRest(); },1000);
 setInterval(()=>{ if(S.queue.length) sync(); fetchDiet(); },60000);
 window.addEventListener('online',()=>{ sync(); fetchDiet(true); });
@@ -1180,7 +1208,7 @@ function seedDemo(){
 const IS_REAL = /github\.io$|localhost$|127\.0\.0\.1$/.test(location.hostname);
 S = load();
 if(!S){ S = IS_REAL ? fresh() : seedDemo(); save(); }
-checkIdle(); morningPull();
+mergeSplitWorkouts(); checkIdle(); morningPull();
 if(S.active && S.view!=='workout' && S.view!=='settings') S.view='workout';
 try{ const m=location.hash.match(/^#zd=(.+)$/); if(m){ const c=parseCode(m[1]); if(c){ S.settings.url=c.url; S.settings.token=c.token; save(); } history.replaceState(null,'',location.pathname); } }catch(e){}
 applyGoals(); render(); sync(); fetchDiet();
