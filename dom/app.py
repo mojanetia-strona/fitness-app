@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.35'
+VERSION = '1.0.36'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -226,6 +226,10 @@ def trv_brief():
             finally:
                 r.close()
             out.append('%s %.1f/%.1f %d%%' % (name, t['current_C'], t['target_C'], t['pos']))
+            room = 's' if name == 'salon' else 'b'
+            if t['target_C'] <= 5.5 and not air(room):
+                log('grzejnik %s zostal na %.1f po wietrzeniu, przywracam' % (name, t['target_C']))
+                trv_target(name, trv_plan(room))
         except Exception as e:
             out.append('%s ?' % name)
     return ' '.join(out)
@@ -376,12 +380,15 @@ def air_stop(room, why):
     AIR_SELF[0] = False
     t = rec.get('trv')
     if t is None:  # nie znamy celu sprzed otwarcia (np. po restarcie): bierzemy z planu na tę porę
-        m, night = mins(), state.get('asleep')
-        if room == 's':
-            t = PLAN['salon_night'] if night else PLAN['salon_day']
-        else:
-            t = PLAN['bed_night'] if night else (PLAN['bed_home'] if is_weekend() or m >= 1080 else PLAN['bed_day'])
+        t = trv_plan(room)
     trv_target(ROOM_TRV[room], t)
+
+
+def trv_plan(room):
+    m, night = mins(), state.get('asleep')
+    if room == 's':
+        return PLAN['salon_night'] if night else PLAN['salon_day']
+    return PLAN['bed_night'] if night else (PLAN['bed_home'] if is_weekend() or m >= 1080 else PLAN['bed_day'])
 
 
 def win_tick():
@@ -389,7 +396,7 @@ def win_tick():
         if win_seen.get(mac) != w['open']:
             first = mac not in win_seen
             win_seen[mac] = w['open']
-            if first or not WIN_ROOM.get(mac):
+            if not WIN_ROOM.get(mac):
                 log('okno %s %s%s (bateria %s%%)' % (mac, 'OTWARTE' if w['open'] else 'zamkniete',
                                                      ' [nowy czujnik]' if first else '', w.get('bat')))
         room = WIN_ROOM.get(mac)
