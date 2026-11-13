@@ -479,12 +479,8 @@ function saveWorkout_(ss, w) {
   deleteWhere_(tr, 1, w.id); deleteWhere_(st, 1, w.id);
   const date = toDate_(w.date);
   const vol = w.sets.reduce((n, s) => n + s.kg * s.reps, 0);
-  tr.appendRow([w.id, date, w.day, new Date(w.start), new Date(w.end), Math.round((w.end - w.start) / 60000), w.sets.length, vol,
-    w.arrive ? new Date(w.arrive) : '', w.exit ? new Date(w.exit) : '', w.arrive && w.first ? Math.round((w.first - w.arrive) / 60000) : '', w.gym || '']);
-  if (tr.getRange(1, 9).getValue() === '') {
-    tr.getRange(1, 9, 1, 4).setValues([['Wejście', 'Wyjście', 'Do 1. serii (min)', 'Siłownia']]).setFontWeight('bold').setBackground(C.head).setFontColor(C.headTxt);
-    tr.getRange('I:J').setNumberFormat('HH:mm');
-  }
+  tr.appendRow([w.id, date, w.day, new Date(w.start), new Date(w.end), Math.round((w.end - w.start) / 60000), w.sets.length, vol]);
+  gymColumns_(tr, w);
   if (st.getMaxColumns() < 11) { st.insertColumnAfter(10); }
   if (st.getRange(1, 11).getValue() === '') st.getRange(1, 11).setValue('Partia').setFontWeight('bold').setBackground(C.head).setFontColor(C.headTxt);
   const rows = w.sets.map(s => [w.id, date, w.day, s.ex, s.set, s.kg, s.reps, e1rm_(s.kg, s.reps), s.kg * s.reps, s.exId, s.m || MUSCLE[s.exId] || 'Inne']);
@@ -696,24 +692,6 @@ function aiEan_(code, hint) {
 }
 // Test z edytora: wybierz testEan i kliknij Uruchom, wynik w Dzienniku wykonania.
 function testEan() { Logger.log(JSON.stringify(eanLookup_(SpreadsheetApp.getActiveSpreadsheet(), '5900617041685'))); }
-
-/* ================= SIŁOWNIA (Skróty iOS: przybycie / wyjście) ================= */
-// ?action=gym&token=…&e=in|out&g=Nazwa siłowni. Apka przy otwarciu dopina wejście do treningu i zamyka go godziną wyjścia minus 15 min.
-function gymSheet_(ss) {
-  return ss.getSheetByName('Siłownia') || (function () { const s = ss.insertSheet('Siłownia'); s.appendRow(['Czas', 'Zdarzenie', 'Siłownia']); s.setFrozenRows(1); s.getRange('A:A').setNumberFormat('d mmm yyyy HH:mm'); return s; })();
-}
-function gymEvent_(ss, e, g) {
-  e = String(e || '').toLowerCase(); if (e !== 'in' && e !== 'out') return { ok: false, error: 'e=in albo e=out' };
-  gymSheet_(ss).appendRow([new Date(), e === 'in' ? 'wejście' : 'wyjście', String(g || '').slice(0, 60)]);
-  return { ok: true };
-}
-function gymRecent_(ss) {
-  const sh = ss.getSheetByName('Siłownia'); if (!sh || sh.getLastRow() < 2) return [];
-  const from = Date.now() - 2 * 864e5, n = Math.min(sh.getLastRow() - 1, 200);
-  return sh.getRange(sh.getLastRow() - n + 1, 1, n, 3).getValues()
-    .filter(r => r[0] instanceof Date && r[0].getTime() >= from)
-    .map(r => ({ t: r[0].getTime(), e: r[1] === 'wejście' ? 'in' : 'out', g: String(r[2] || '') }));
-}
 
 /* ================= SEN Z TELEFONU ================= */
 // Skróty iOS: ?action=phone&token=…&e=down (telefon odłożony na ładowarkę) / e=up (zdjęty z ładowarki).
