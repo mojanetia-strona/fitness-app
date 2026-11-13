@@ -359,6 +359,7 @@ const LIB = [
 const MGROUPS = ['Klatka','Barki','Triceps','Plecy','Biceps','Nogi','Inne'];
 const CARDIO = ['Rower','Rower stacjonarny','Bieżnia','Bieganie','Orbitrek','Wioślarz','Spacer','Schody','Inne'];
 const IDLE_MIN = 180; // awaryjnie: po 3 h bez dotknięcia apki trening kończy się sam (normalnie kończy go wyjście z siłowni albo przycisk)
+const GYM_OUT_MIN = 15; // od godziny wyjścia z siłowni odejmujemy tyle minut (szatnia, droga do drzwi)
 const RESUME_MIN = 90; // ten sam trening zaczęty ponownie w ciągu 90 min od końca = kontynuacja, nie nowy zapis
 const SLEEP_ADJ_MIN = 20; // stała korekta snu z telefonu // po tylu minutach bez dotknięcia apki trening kończy się sam
 const GOAL = {start:85, target:90.5, rateLo:0.2, rateHi:0.35};
@@ -482,6 +483,24 @@ function resumeWorkout(w){
   S.active={id:w.id, dayId:w.dayId, start:w.start, last:now, ex};
   S.summary=null; S.view='workout'; save(); render(); wake(true); toast('Kontynuujesz trening z '+new Date(w.start).toTimeString().slice(0,5));
 }
+/* siłownia: zdarzenia ze Skrótów iOS (przez arkusz). Wejście dopina się do treningu, wyjście go kończy. */
+function applyGym(ev){
+  if(!Array.isArray(ev)||!ev.length) return;
+  ev=ev.slice().sort((x,y)=>x.t-y.t); let changed=false;
+  const arrFor=w=>{ const c=ev.filter(x=>x.e==='in' && x.t<=w.start+30*60000 && x.t>=w.start-3*3600000); return c[c.length-1]; };
+  const a=S.active;
+  if(a){
+    if(!a.arrive){ const i=arrFor(a); if(i){ a.arrive=i.t; a.gym=i.g; changed=true; } }
+    const o=ev.find(x=>x.e==='out' && x.t>a.start+5*60000 && (!a.arrive||x.t>a.arrive));
+    if(o){ a.exit=o.t; if(!a.gym) a.gym=o.g; const ls=lastSetTs(a);
+      finishWorkout(Math.max(ls?ls+60000:a.start, o.t-GYM_OUT_MIN*60000), true); return; }
+  }
+  S.workouts.filter(w=>w.end && Date.now()-w.end<2*864e5).forEach(w=>{ let ch=false;
+    if(!w.arrive){ const i=arrFor(w); if(i){ w.arrive=i.t; w.gym=i.g; ch=true; } }
+    if(!w.exit){ const o=ev.find(x=>x.e==='out' && x.t>=w.end-30*60000 && x.t<=w.end+3*3600000); if(o){ w.exit=o.t; if(!w.gym) w.gym=o.g; ch=true; } }
+    if(ch){ changed=true; enqueue('workout', workoutPayload(w), 'w:'+w.id); } });
+  if(changed){ save(); render(); }
+}
 /* jednorazowo: sklej treningi rozbite przez stare auto-zamykanie (ten sam dzień i plan, przerwa < 90 min) */
 function mergeSplitWorkouts(){
   if(S.mergedSplit2) return; S.mergedSplit2=true;
@@ -506,6 +525,7 @@ function checkIdle(){
 function finishWorkout(endTs, auto){
   const a=S.active; if(!a) return;
   a.end=endTs||Date.now(); delete a.last; if(auto) a.auto=true;
+  { let f=0; a.ex.forEach(e=>e.sets.forEach(s=>{ if(s.done&&s.ts&&(!f||s.ts<f)) f=s.ts; })); if(f&&(!a.first||f<a.first)) a.first=f; }
   a.ex.forEach(e=>e.sets=e.sets.map(s=>({kg:num(s.kg)||0,reps:num(s.reps)||0,done:!!s.done})).filter(s=>s.done));
   a.ex=a.ex.filter(e=>e.sets.length);
   const goTrain=!auto || S.view==='workout';
@@ -515,14 +535,14 @@ function finishWorkout(endTs, auto){
     if(before && best>before+0.01) prs.push({name:exD(e.exId).name, v:best, d:best-before}); });
   const sets=a.ex.reduce((n,e)=>n+e.sets.length,0); const vol=a.ex.reduce((n,e)=>n+e.sets.reduce((m,s)=>m+s.kg*s.reps,0),0);
   S.workouts.push(a); S.active=null; if(goTrain) S.view='train';
-  S.summary={dayId:a.dayId, min:Math.round((a.end-a.start)/60000), sets, vol, prs, auto:!!auto};
+  S.summary={dayId:a.dayId, min:Math.round((a.end-a.start)/60000), sets, vol, prs, auto:!!auto, gym:!!a.exit};
   enqueue('workout', workoutPayload(a), 'w:'+a.id);
   stopRest(); wake(false); render();
 }
 function workoutPayload(w){
   const d=DAY[w.dayId]; const rows=[];
   w.ex.forEach(e=>{ const x=exD(e.exId); e.sets.forEach((s,i)=>rows.push({exId:e.exId, ex:x.name, m:x.m||'Inne', set:i+1, kg:s.kg, reps:s.reps})); });
-  return {id:w.id, date:ymd(w.start), day:d?d.name:w.dayId, dayId:w.dayId, start:w.start, end:w.end, sets:rows};
+  return {id:w.id, date:ymd(w.start), day:d?d.name:w.dayId, dayId:w.dayId, start:w.start, end:w.end, sets:rows, arrive:w.arrive||null, exit:w.exit||null, first:w.first||null, gym:w.gym||''};
 }
 
 /* ============ rest timer + sound + wake ============ */
@@ -543,7 +563,7 @@ function tickRest(){
 let wl=null;
 async function wake(on){ try{ if(on && navigator.wakeLock){ wl=await navigator.wakeLock.request('screen'); } else if(!on && wl){ await wl.release(); wl=null; } }catch(e){} }
 function morningPull(){ const h=new Date().getHours(); const t=today(); const dd=S.diet.daily[t]; const noW=!S.weights.some(w=>w.date===t); if(h>=4&&h<14&&(!(dd&&dd.wake)||noW)&&!(S.diet.fetched&&Date.now()-S.diet.fetched<60000)) fetchDiet(true); }
-document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible'){ morningPull(); checkIdle(); if(S.active) wake(true); sync(); } });
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible'){ morningPull(); checkIdle(); if(S.active){ wake(true); fetchDiet(true); } sync(); } });
 
 
 /* ============ charts ============ */
@@ -583,7 +603,7 @@ V.train = () => {
   h+=labReminder();
   if(S.demo) h+=`<div class="demo"><span><b>Dane przykładowe.</b> Tak będzie wyglądać po kilku tygodniach.</span><button data-a="clearDemo">Wyczyść</button></div>`;
   if(S.summary){ const s=S.summary;
-    h+=`<div class="summary"><h3>${esc(DAY[s.dayId].name)} zapisany</h3>${s.auto?`<p class="note" style="color:#B9C7D0;margin:0 0 6px">Zakończony automatycznie po 3 h bez aktywności. Czas liczony do ostatniej serii.</p>`:''}<div class="row note" style="color:#fff"><span class="num" style="font-weight:600">${s.min} min</span>·<span class="num" style="font-weight:600">${s.sets} serii</span>·<span class="num" style="font-weight:600">${fN(s.vol/1000,2)} t</span></div>
+    h+=`<div class="summary"><h3>${esc(DAY[s.dayId].name)} zapisany</h3>${s.gym?`<p class="note" style="color:#B9C7D0;margin:0 0 6px">Zakończony po wyjściu z siłowni (godzina wyjścia minus ${GYM_OUT_MIN} min).</p>`:s.auto?`<p class="note" style="color:#B9C7D0;margin:0 0 6px">Zakończony automatycznie po 3 h bez aktywności. Czas liczony do ostatniej serii.</p>`:''}<div class="row note" style="color:#fff"><span class="num" style="font-weight:600">${s.min} min</span>·<span class="num" style="font-weight:600">${s.sets} serii</span>·<span class="num" style="font-weight:600">${fN(s.vol/1000,2)} t</span></div>
       ${s.prs.length?'<div class="mt">'+s.prs.map(p=>`<div class="row" style="justify-content:space-between"><span>Rekord: ${esc(p.name)}</span><b class="delta" style="color:#00B8C7">+${fN(p.d)} kg e1RM</b></div>`).join('')+'</div>':''}
       <button class="btn ghost mt" data-a="dismissSummary">OK</button></div>`; }
   if(!S.settings.url && !S.demo) h+=`<div class="demo"><span><b>Apka nie jest połączona z arkuszem.</b> Treningi zapisują się tylko na telefonie.</span><button data-a="nav" data-v="settings">Połącz</button></div>`;
@@ -818,12 +838,12 @@ const MEALNAME = {'ŚNIADANIE':'Śniadanie','II ŚNIADANIE':'II śniadanie','OBI
 const addDays = (s,n) => ymd(dParse(s).getTime()+n*864e5);
 let dietFetching=false;
 async function fetchDiet(force){
-  const st=S.settings; if(!st.url || dietFetching) return; if(!force && S.diet.fetched && Date.now()-S.diet.fetched<20*60000) return;
+  const st=S.settings; if(!st.url || dietFetching) return; if(!force && S.diet.fetched && Date.now()-S.diet.fetched<(S.active?2:20)*60000) return;
   if(navigator.onLine===false) return; dietFetching=true;
   try{ const t=today(); const r=await fetch(st.url+'?action=diet&from='+addDays(t,-7)+'&to='+addDays(t,14)+'&token='+encodeURIComponent(st.token)); const j=await r.json();
     if(j.ok){ const cat={}; j.catering.forEach(m=>{ (cat[m.date]=cat[m.date]||[]).push(m); });
       Object.keys(S.diet.catering).forEach(d=>{ if(!cat[d] && (d<addDays(t,-7)||d>addDays(t,14))) cat[d]=S.diet.catering[d]; });
-      S.diet.catering=cat;
+      S.diet.catering=cat; try{ applyGym(j.gym); }catch(e){}
       const pend=new Set(S.queue.filter(q=>q.type==='eat').map(q=>q.key));
       Object.keys(S.diet.eat).forEach(k=>{ if(!pend.has('eat:'+k)) delete S.diet.eat[k]; });
       const have=new Set(S.diet.foods.map(f=>f.id)); const delPend=new Set(S.queue.filter(q=>q.type==='delFood').map(q=>q.data.id));
