@@ -916,6 +916,8 @@ function espSync_(ss, p) {
   const days = {};
   for (let i = 1; i <= 7; i++) { const v = med(vals.filter(x => x.dow === i).map(x => x.min)); if (v !== null) days[i] = v; }
   out.wake = { wd: med(vals.filter(v => !v.we).map(v => v.min)), we: med(vals.filter(v => v.we).map(v => v.min)), days: days };
+  // budziki z kalendarza ustawione wieczorem (płytka zaczyna budzenie światłem tak, żeby o budziku było jasno)
+  try { out.alarms = JSON.parse(PropertiesService.getScriptProperties().getProperty('ALARMS_NEXT') || '[]').map(a => a.t); } catch (e) { out.alarms = []; }
   return out;
 }
 

@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.38'
+VERSION = '1.0.39'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -49,6 +49,12 @@ PLAN = {
     'ext_temp': True,       # salon: temperatura z Qingpinga do głowicy
     'scale_min': 45.0, 'scale_max': 150.0,
     'lamp_salon': '192.168.100.36',  # gniazdko Shelly „Lampa Salon”: włącza Google Home przy powrocie, płytka gasi na noc
+    # --- budzenie światłem: żarówka WiZ „Lampka Sypialnia” (lokalnie, UDP 38899) ---
+    'wiz_bed': '192.168.100.37',
+    'wake_light': True,
+    'wake_light_min': 30,   # tyle trwa rozjaśnianie (od ciemnego pomarańczu do jasnej bieli)
+    'wake_light_wd': 420,   # w tygodniu start nie wcześniej niż 7:00 ...
+    'wake_light_we': 480,   # ... w weekend nie wcześniej niż 8:00 (wcześniej tylko pod budzik z kalendarza)
 }
 
 cfg = {}
@@ -204,6 +210,87 @@ def plug_set(ip, on, label):
             time.sleep(2)
     log('%s blad %s' % (label, last))
     return False
+
+
+def wiz(params, method='setPilot'):
+    """Żarówka WiZ w sieci domowej: JSON po UDP na port 38899. Zwraca odpowiedź (dict) albo None."""
+    ip = PLAN.get('wiz_bed')
+    if not ip:
+        return None
+    import socket
+    msg = json.dumps({'method': method, 'params': params}).encode()
+    for i in range(3):
+        s = None
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.settimeout(1.5)
+            s.sendto(msg, socket.getaddrinfo(ip, 38899)[0][-1])
+            data = s.recv(512)
+            return json.loads(data)
+        except Exception as e:
+            last = e
+            time.sleep(0.5)
+        finally:
+            if s:
+                s.close()
+    state['wiz_err'] = str(last)
+    return None
+
+
+def wake_pilot(p):
+    """Wygląd światła w chwili p (0..1) rozjaśniania: bardzo długo ciemno i ciepło, jasno dopiero na końcu."""
+    dim = int(10 + 90 * p ** 2.5 + 0.5)  # WiZ: 10% to najciemniej
+    if p < 0.4:
+        # najpierw ciemny pomarańcz (jak świt), pierwsze ~12 min na minimum jasności
+        return {'state': True, 'dimming': dim, 'r': 255, 'g': int(25 + 75 * p / 0.4), 'b': 0}
+    temp = 2200 + int(1300 * ((p - 0.4) / 0.6) ** 1.5)  # potem ciepła biel, na końcu 3500 K
+    return {'state': True, 'dimming': dim, 'temp': temp // 100 * 100}
+
+
+def wake_alarm_min(sync):
+    """Najwcześniejszy dzisiejszy poranny budzik z kalendarza (minuty od północy) albo None."""
+    tm = now_local()
+    today = '%04d-%02d-%02d' % (tm[0], tm[1], tm[2])
+    best = None
+    for a in (sync or {}).get('alarms') or []:
+        try:
+            if a[:10] != today:
+                continue
+            m = int(a[11:13]) * 60 + int(a[14:16])
+        except Exception:
+            continue
+        if m < 720 and (best is None or m < best):
+            best = m
+    return best
+
+
+def wake_light_start(sync, weekend):
+    """Kiedy dziś zacząć rozjaśnianie (minuty od północy)."""
+    fade = PLAN['wake_light_min']
+    start = max(wake_min(sync, weekend) - fade, PLAN['wake_light_we' if weekend else 'wake_light_wd'])
+    am = wake_alarm_min(sync)
+    if am is not None and am - fade < start:
+        start = am - fade  # budzik z kalendarza: o godzinie budzika ma być już jasno
+    return max(start, 0)
+
+
+def wake_light_tick():
+    """Co 15 s podczas rozjaśniania: kolejny krok jasności."""
+    wl = state.get('wl')
+    if not wl or time.time() - state.get('wl_at', 0) < 15:
+        return
+    state['wl_at'] = time.time()
+    p = (time.time() - wl['t0']) / (PLAN['wake_light_min'] * 60.0)
+    if p >= 1:
+        wiz(wake_pilot(1.0))
+        state['wl'] = None
+        log('budzenie swiatlem: pelna jasnosc')
+        return
+    if wiz(wake_pilot(max(p, 0))) is None and not wl.get('err'):
+        wl = dict(wl)
+        wl['err'] = 1
+        state['wl'] = wl
+        log('lampka sypialnia nie odpowiada (%s)' % state.get('wiz_err'))
 
 
 def trv_target(name, temp, force=False):
@@ -580,7 +667,7 @@ def day_key():
     return '%04d%02d%02d' % (tm[0], tm[1], tm[2])
 
 
-SAVE_KEYS = ('asleep', 'bed_off_at', 'bed_eve', 'night_on', 'bed_pause', 'air')
+SAVE_KEYS = ('asleep', 'bed_off_at', 'bed_eve', 'night_on', 'bed_pause', 'air', 'wl')
 
 
 def save_state():
@@ -639,6 +726,9 @@ def tick_rules(sync, q):
         dev_set('bed_hum', 'on', False, 'sypialnia nawilzacz off')
         if PLAN.get('lamp_salon'):
             plug_set(PLAN['lamp_salon'], False, 'lampa salon off')
+        if PLAN.get('wiz_bed'):
+            state['wl'] = None
+            log('lampka sypialnia off' if wiz({'state': False}) is not None else 'lampka sypialnia nie odpowiada (%s)' % state.get('wiz_err'))
         # salon na noc: nawilżacz i oczyszczacz zostają włączone, ale w trybie nocnym (cicho)
         dev_set('salon_hum', 'on', True)
         dev_set('salon_hum', 'sh_mode', 1, 'salon nawilzacz tryb nocny')
@@ -655,10 +745,23 @@ def tick_rules(sync, q):
             trv_target('salon', PLAN['salon_day'])
         if m >= wm - PLAN['bed_pre_min'] and once('bed_heat'):
             trv_target('bed', PLAN['bed_morning'])
+        # budzenie światłem: start nie wcześniej niż 7:00 / 8:00 (weekend), wcześniej tylko pod budzik z kalendarza
+        if PLAN['wake_light'] and PLAN.get('wiz_bed') and sync:
+            ws = wake_light_start(sync, weekend)
+            if ws <= m < ws + PLAN['wake_light_min'] and once('wake_light'):
+                am = wake_alarm_min(sync)
+                log('budzenie swiatlem start %02d:%02d (pobudka %d:%02d%s)' % (
+                    ws // 60, ws % 60, wm // 60, wm % 60, ', budzik %d:%02d' % (am // 60, am % 60) if am is not None else ''))
+                state['wl'] = {'t0': time.time() - (m - ws) * 60}
+                state['wl_at'] = 0
 
     # --- wstałem: telefon zdjęty rano ---
     if was and not asleep and ph and ph.get('e') == 'up':
         log('rano: telefon zdjety')
+        if state.get('wl'):
+            state['wl'] = None
+            wiz(wake_pilot(1.0))
+            log('budzenie swiatlem: wstalem, pelna jasnosc')
         # tryb dzienny: nawilżacz na stałą wilgotność (dalej moc ustawia reguła wg Qingpinga), oczyszczacz na auto
         dev_set('salon_hum', 'on', True)
         if dev_set('salon_hum', 'sh_mode', 0, 'rano: salon nawilzacz tryb dzienny'):
@@ -772,6 +875,13 @@ def setup():
         pass
     if load_state():
         log('stan przywrocony (noc: %s)' % state.get('asleep'))
+    if PLAN.get('wiz_bed'):
+        r = wiz({}, 'getPilot')
+        if r and r.get('result'):
+            x = r['result']
+            log('lampka sypialnia ok (%s, %s%%)' % ('wl' if x.get('state') else 'wyl', x.get('dimming')))
+        else:
+            log('lampka sypialnia nie odpowiada (%s)' % state.get('wiz_err'))
     if not state.get('pur_model') and dev.get('salon_pur'):
         try:
             state['pur_model'] = (dev['salon_pur'].call('miIO.info', [], 1) or {}).get('model')
@@ -817,6 +927,7 @@ def run():
                 save_state()
             scale_tick()
             win_tick()
+            wake_light_tick()
             if log_buf and (time.time() - last_report > 120 or len(log_buf) > 8):
                 last_report = time.time()
                 flush_log()
