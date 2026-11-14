@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.36'
+VERSION = '1.0.37'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -48,6 +48,7 @@ PLAN = {
     'air_max_min': 90,      # wietrzenie: po tylu minutach bez wiadomości z czujnika wracamy do normy (bezpiecznik)
     'ext_temp': True,       # salon: temperatura z Qingpinga do głowicy
     'scale_min': 45.0, 'scale_max': 150.0,
+    'lamp_salon': '192.168.100.36',  # gniazdko Shelly „Lampa Salon”: włącza Google Home przy powrocie, płytka gasi na noc
 }
 
 cfg = {}
@@ -187,6 +188,22 @@ def trv_call(trv_id, method, params):
             last = e
             time.sleep(2)
     raise last
+
+
+def plug_set(ip, on, label):
+    # gniazdko Shelly Gen3 w sieci domowej (lokalne RPC)
+    for i in range(3):
+        try:
+            gc.collect()
+            r = requests.get('http://%s/rpc/Switch.Set?id=0&on=%s' % (ip, 'true' if on else 'false'), timeout=8)
+            r.close()
+            log(label)
+            return True
+        except Exception as e:
+            last = e
+            time.sleep(2)
+    log('%s blad %s' % (label, last))
+    return False
 
 
 def trv_target(name, temp, force=False):
@@ -620,6 +637,8 @@ def tick_rules(sync, q):
     if asleep and not was:
         log('noc: telefon odlozony')
         dev_set('bed_hum', 'on', False, 'sypialnia nawilzacz off')
+        if PLAN.get('lamp_salon'):
+            plug_set(PLAN['lamp_salon'], False, 'lampa salon off')
         # salon na noc: nawilżacz i oczyszczacz zostają włączone, ale w trybie nocnym (cicho)
         dev_set('salon_hum', 'on', True)
         dev_set('salon_hum', 'sh_mode', 1, 'salon nawilzacz tryb nocny')
