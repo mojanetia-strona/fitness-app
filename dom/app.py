@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.37'
+VERSION = '1.0.38'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -711,17 +711,18 @@ def tick_rules(sync, q):
             elif b_on:
                 state['bed_pause'] = False
                 # moc według wilgotności: sucho = mocno, blisko celu = cicho (z zapasem, żeby nie przeskakiwał co chwilę)
+                # odczyt nawilżacza skacze o kilka %, więc szeroki zapas i zmiana poziomu najwyżej co 15 min
                 b_mode, = dev_get('bed_hum', ['bh_mode'])
                 cur = b_mode if b_mode in (1, 2, 3) else 2
-                want = cur
-                if b_rh < 38 or (cur == 3 and b_rh < 42):
+                if b_rh < 38 or (cur == 3 and b_rh < 43):
                     want = 3
-                elif b_rh < 48 or (cur == 2 and b_rh < 51):
+                elif b_rh < 45 or (cur >= 2 and b_rh < 52):
                     want = 2
                 else:
                     want = 1
-                if want != b_mode:
-                    dev_set('bed_hum', 'bh_mode', want, 'sypialnia nawilzacz poziom %d (RH %d)' % (want, b_rh))
+                if want != b_mode and (b_mode not in (1, 2, 3) or time.time() - state.get('bed_lvl_at', 0) > 900):
+                    if dev_set('bed_hum', 'bh_mode', want, 'sypialnia nawilzacz poziom %d (RH %d)' % (want, b_rh)):
+                        state['bed_lvl_at'] = time.time()
     if asleep:
         state['bed_pause'] = False
 
