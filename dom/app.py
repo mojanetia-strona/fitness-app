@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.45'
+VERSION = '1.0.46'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -568,6 +568,21 @@ def air_guard():
                 AIR_SELF[0] = True
                 dev_set(d, 'on', False, '%s wlaczony przy otwartym oknie, wylaczam (wlacze po zamknieciu)' % d)
                 AIR_SELF[0] = False
+        # grzejnik też ma zostać skręcony (polecenie mogło nie dojść albo ktoś go podkręcił)
+        gw, tid = cfg.get('shelly_gw'), cfg.get('trv', {}).get(ROOM_TRV[room])
+        if gw and tid is not None:
+            try:
+                gc.collect()
+                r = requests.get('http://%s/rpc/BluTrv.GetRemoteStatus?id=%s' % (gw, tid), timeout=10)
+                try:
+                    tgt = r.json()['status']['trv:0']['target_C']
+                finally:
+                    r.close()
+                if tgt > ROOM_COLD[room] + 0.5:
+                    log('grzejnik %s na %.1f przy otwartym oknie, skrecam ponownie' % (ROOM_TRV[room], tgt))
+                    trv_target(ROOM_TRV[room], ROOM_COLD[room], True)
+            except Exception as e:
+                print('air_guard trv', e)
 
 
 def win_tick():
