@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.40'
+VERSION = '1.0.41'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -495,6 +495,55 @@ def trv_plan(room):
     return PLAN['bed_night'] if night else (PLAN['bed_home'] if is_weekend() or m >= 1080 else PLAN['bed_day'])
 
 
+GW_WIN = {}  # id czujnika okna w bramce Shelly -> mac
+GW_STATE = {'map_at': 0, 'poll_at': 0, 'logged': False}
+
+
+def gw_rpc(method, params=''):
+    gw = cfg.get('shelly_gw')
+    if not gw:
+        return None
+    gc.collect()
+    r = requests.get('http://%s/rpc/%s%s' % (gw, method, params), timeout=8)
+    try:
+        return r.json()
+    finally:
+        r.close()
+
+
+def gw_windows():
+    # zabezpieczenie: bramka Shelly słucha Bluetooth bez przerwy, więc zna stan okien, nawet gdy płytka zgubi sygnał
+    now = time.time()
+    try:
+        if not GW_WIN and now - GW_STATE['map_at'] > 3600:
+            GW_STATE['map_at'] = now
+            conf = gw_rpc('Shelly.GetConfig') or {}
+            for k, v in conf.items():
+                if k.startswith('bthomesensor:') and isinstance(v, dict) and v.get('obj_id') == 0x2D:
+                    mac = str(v.get('addr', '')).upper()
+                    if mac in WIN_ROOM:
+                        GW_WIN[v['id']] = mac
+            if not GW_STATE['logged']:
+                GW_STATE['logged'] = True
+                log('bramka: czujniki okien %s' % (','.join(ROOM_NAME[WIN_ROOM[m]] for m in GW_WIN.values()) or 'brak (dodaj je do bramki w aplikacji Shelly)'))
+        if not GW_WIN or now - GW_STATE['poll_at'] < 30:
+            return
+        GW_STATE['poll_at'] = now
+        for sid, mac in GW_WIN.items():
+            st = gw_rpc('BTHomeSensor.GetStatus', '?id=%d' % sid) or {}
+            if 'value' not in st:
+                continue
+            val = 1 if st['value'] else 0
+            w = win.get(mac)
+            # wiadomość z Bluetooth płytki ma pierwszeństwo; bramkę bierzemy, gdy płytka nic świeżego nie słyszała
+            if w is None or (w['open'] != val and now - w['t'] > 60):
+                if w is not None:
+                    log('okno %s: stan z bramki (%s), plytka zgubila sygnal' % (ROOM_NAME[WIN_ROOM[mac]], 'otwarte' if val else 'zamkniete'))
+                win[mac] = {'open': val, 'bat': (w or {}).get('bat'), 't': now}
+    except Exception as e:
+        print('gw okna', e)
+
+
 def win_tick():
     for mac, w in list(win.items()):
         if win_seen.get(mac) != w['open']:
@@ -563,8 +612,8 @@ def ble_on():
     b = bluetooth.BLE()
     b.active(True)
     b.irq(ble_irq)
-    # wycinek czasu radia (50 ms co 200 ms): czujniki okien nadają krótko, a Wi-Fi dalej ma 75% czasu
-    b.gap_scan(0, 200000, 50000, True)
+    # wycinek czasu radia (100 ms co 200 ms): czujniki okien nadają krótko, Wi-Fi ma drugą połowę czasu
+    b.gap_scan(0, 200000, 100000, True)
     BLE[0] = b
 
 
@@ -582,7 +631,7 @@ def ble_resume():
     scale['boost'] = False  # scale_tick w razie potrzeby znowu włączy ciągły skan
     if BLE[0]:
         try:
-            BLE[0].gap_scan(0, 200000, 50000, True)
+            BLE[0].gap_scan(0, 200000, 100000, True)
         except Exception as e:
             print('ble resume err', e)
 
@@ -933,6 +982,7 @@ def run():
                 tick_rules(sync, q)
                 save_state()
             scale_tick()
+            gw_windows()
             win_tick()
             wake_light_tick()
             if log_buf and (time.time() - last_report > 120 or len(log_buf) > 8):
