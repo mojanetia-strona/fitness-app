@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.41'
+VERSION = '1.0.42'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -812,7 +812,8 @@ def tick_rules(sync, q):
     # --- wstałem: telefon zdjęty rano ---
     if was and not asleep and ph and ph.get('e') == 'up':
         log('rano: telefon zdjety')
-        if state.get('wl'):
+        # wstałem: lampka od razu na pełną jasność, także gdy rozjaśnianie jeszcze się nie zaczęło
+        if PLAN['wake_light'] and PLAN.get('wiz_bed'):
             state['wl'] = None
             wiz(wake_pilot(1.0))
             log('budzenie swiatlem: wstalem, pelna jasnosc')
