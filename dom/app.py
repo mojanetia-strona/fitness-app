@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.46'
+VERSION = '1.0.47'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -516,7 +516,7 @@ def gw_windows():
     # zabezpieczenie: bramka Shelly słucha Bluetooth bez przerwy, więc zna stan okien, nawet gdy płytka zgubi sygnał
     now = time.time()
     try:
-        if not GW_WIN and now - GW_STATE['map_at'] > 3600:
+        if not GW_WIN and now - GW_STATE['map_at'] > 600:
             GW_STATE['map_at'] = now
             conf = gw_rpc('Shelly.GetConfig') or {}
             for k, v in conf.items():
@@ -532,7 +532,7 @@ def gw_windows():
         GW_STATE['poll_at'] = now
         for sid, mac in GW_WIN.items():
             st = gw_rpc('BTHomeSensor.GetStatus', '?id=%d' % sid) or {}
-            if 'value' not in st:
+            if st.get('value') is None:  # bramka jeszcze nic od czujnika nie dostała
                 continue
             val = 1 if st['value'] else 0
             w = win.get(mac)
