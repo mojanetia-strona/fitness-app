@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.47'
+VERSION = '1.0.48'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -518,12 +518,19 @@ def gw_windows():
     try:
         if not GW_WIN and now - GW_STATE['map_at'] > 600:
             GW_STATE['map_at'] = now
-            conf = gw_rpc('Shelly.GetConfig') or {}
-            for k, v in conf.items():
-                if k.startswith('bthomesensor:') and isinstance(v, dict) and v.get('obj_id') == 0x2D:
-                    mac = str(v.get('addr', '')).upper()
-                    if mac in WIN_ROOM:
-                        GW_WIN[v['id']] = mac
+            off = 0
+            while True:  # komponenty dodane w bramce (czujniki BTHome) są tylko tu, stronicowane
+                res = gw_rpc('Shelly.GetComponents', '?dynamic_only=true&offset=%d' % off) or {}
+                comps = res.get('components') or []
+                for c in comps:
+                    v = c.get('config') or {}
+                    if c.get('key', '').startswith('bthomesensor:') and v.get('obj_id') == 0x2D:
+                        mac = str(v.get('addr', '')).upper()
+                        if mac in WIN_ROOM:
+                            GW_WIN[v['id']] = mac
+                off += len(comps)
+                if not comps or off >= res.get('total', 0):
+                    break
             if not GW_STATE['logged']:
                 GW_STATE['logged'] = True
                 log('bramka: czujniki okien %s' % (','.join(ROOM_NAME[WIN_ROOM[m]] for m in GW_WIN.values()) or 'brak (dodaj je do bramki w aplikacji Shelly)'))
