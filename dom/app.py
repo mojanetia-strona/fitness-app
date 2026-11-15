@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.39'
+VERSION = '1.0.40'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -624,7 +624,9 @@ def scale_tick():
     if scale['last_kg'] and abs(kg - scale['last_kg']) < 0.05 and time.time() - scale['last_sent'] < 600:
         return
     try:
-        gas({'kg': '%.2f' % kg})
+        res = gas({'kg': '%.2f' % kg})
+        if isinstance(res, dict) and res.get('pobudka_waga'):
+            NOW[0] = True  # pobudka z wagi: od razu synchronizacja i reguły, bez czekania na kolejny cykl
         scale['last_kg'] = kg
         scale['last_sent'] = time.time()
         log('waga %.2f kg zapisana' % kg)
@@ -632,6 +634,9 @@ def scale_tick():
         log('waga blad %s' % e)
         scale['pending'] = kg
         scale['pending_at'] = time.time()
+
+
+NOW = [False]  # wymuszenie natychmiastowej synchronizacji (np. pobudka z wagi)
 
 
 # ---------- logika ----------
@@ -902,7 +907,9 @@ def run():
     while True:
         wdt.feed()
         try:
-            if time.time() - last_sync >= 120:
+            force = NOW[0]
+            NOW[0] = False
+            if force or time.time() - last_sync >= 30:
                 last_sync = time.time()
                 try:
                     sync = gas({})
@@ -912,14 +919,14 @@ def run():
                     # brak łączności z arkuszem przez ok. 10 min: zapisz przyczynę i zrestartuj (płytka sama wraca do pracy)
                     state['sync_fail'] = state.get('sync_fail', 0) + 1
                     # brak pamięci sam nie minie (rozdrobniona pamięć): restart od razu, a nie po 10 min
-                    if state['sync_fail'] >= 5 or isinstance(e, MemoryError):
+                    if state['sync_fail'] >= 20 or isinstance(e, MemoryError):
                         try:
                             with open('lasterr.txt', 'w') as f:
                                 f.write('%s %s (wolna pamiec %d)' % (stamp(), repr(e)[:120], gc.mem_free()))
                         except Exception:
                             pass
                         machine.reset()
-            if time.time() - last_rules >= 60:
+            if force or time.time() - last_rules >= 30:
                 last_rules = time.time()
                 q = dev_get('qingping', ['q_rh', 'q_pm25', 'q_t', 'q_co2'])
                 state['q'] = q

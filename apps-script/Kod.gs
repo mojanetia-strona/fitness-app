@@ -765,7 +765,9 @@ function phoneNight_(ss, date) {
   const v2 = dl.getRange(2, 1, dl.getLastRow() - 1, 1).getValues();
   for (let i = 0; i < v2.length; i++) if (key_(v2[i][0]) === date) { dl.getRange(i + 2, 6, 1, 2).setValues([[new Date(bed), new Date(up.t)]]).setNumberFormat('HH:mm'); break; }
   // pobudka: pierwsze zdjęcie telefonu po nocy (skrót iOS włącza wtedy poranną muzykę)
-  let sp = null; try { sp = morningMusic_(ss); } catch (err) { sp = 'blad: ' + err.message; }
+  let sp = null;
+  if (PropertiesService.getScriptProperties().getProperty('MUSIC_DONE') === date) sp = 'juz gra (z wagi)';
+  else { try { sp = morningMusic_(ss); } catch (err) { sp = 'blad: ' + err.message; } }
   return { date: date, hours: hours, pobudka: true, spotify: sp };
 }
 
@@ -859,7 +861,13 @@ function scaleWake_(ss) {
   if (last[0].getTime() < d0 - 6 * 36e5 || last[0].getTime() >= d0 + 4 * 36e5) return false; // odłożony na noc (wczoraj od 18:00 do 4:00)
   log.appendRow([now, 'zdjęty', 'waga']);
   try { const lg = ss.getSheetByName('Dom'); if (lg) lg.appendRow([now, 'pobudka z wagi (telefon jeszcze na ladowarce)']); } catch (e) {}
-  // sen i poranna muzyka w osobnym przebiegu, żeby płytka nie czekała na odpowiedź
+  // muzyka od razu (Samsung łączy głośnik, Spotify gra playlistę), żeby ruszyła zaraz po zejściu z wagi
+  try {
+    const hook = PropertiesService.getScriptProperties().getProperty('SAMSUNG_HOOK');
+    if (hook) UrlFetchApp.fetch(hook, { muteHttpExceptions: true });
+    if (spotifyPlay_(ss).indexOf('gra na') === 0) PropertiesService.getScriptProperties().setProperty('MUSIC_DONE', today);
+  } catch (e) {}
+  // zapis snu w osobnym przebiegu, żeby płytka nie czekała
   ScriptApp.newTrigger('pobudkaZWagi').timeBased().after(1000).create();
   return true;
 }
