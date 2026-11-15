@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.44'
+VERSION = '1.0.45'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -1022,7 +1022,7 @@ def run():
                 state['hb'] = time.time()
                 q = state.get('q') or [None] * 4
                 flush_log('ok RH %s T %s CO2 %s PM %s | sypialnia RH %s | %s | mem %d' % (q[0], q[2], q[3], q[1], state.get('bed_rh'), trv_brief(), gc.mem_free()))
-            if time.time() - state.get('upd', time.time() - 600) > 10800:
+            if time.time() - state.setdefault('upd', time.time()) > 10800:  # setdefault: start liczy się od uruchomienia
                 state['upd'] = time.time()
                 check_update()
             if not network.WLAN(network.STA_IF).isconnected():
