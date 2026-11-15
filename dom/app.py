@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.43'
+VERSION = '1.0.44'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -545,7 +545,33 @@ def gw_windows():
         print('gw okna', e)
 
 
+AIR_GUARD = [0]
+
+
+def air_guard():
+    # przy otwartym oknie sprzęt ma stać wyłączony, nawet gdy włączy go ktoś inny (Google Home, Mi Home, przycisk);
+    # takie włączenie zapamiętujemy, więc po zamknięciu okna sprzęt wróci włączony
+    if time.time() - AIR_GUARD[0] < 30:
+        return
+    AIR_GUARD[0] = time.time()
+    for room in ('s', 'b'):
+        rec = air(room)
+        if not rec:
+            continue
+        for d in ROOM_DEV[room]:
+            on, = dev_get(d, ['on'])
+            if on:
+                rec = dict(rec)
+                rec['on'] = dict(rec.get('on') or {})
+                rec['on'][d] = True
+                air_put(room, rec)
+                AIR_SELF[0] = True
+                dev_set(d, 'on', False, '%s wlaczony przy otwartym oknie, wylaczam (wlacze po zamknieciu)' % d)
+                AIR_SELF[0] = False
+
+
 def win_tick():
+    air_guard()
     for mac, w in list(win.items()):
         if win_seen.get(mac) != w['open']:
             first = mac not in win_seen
