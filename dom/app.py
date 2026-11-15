@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.42'
+VERSION = '1.0.43'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -284,6 +284,7 @@ def wake_light_tick():
     if p >= 1:
         wiz(wake_pilot(1.0))
         state['wl'] = None
+        state['wl_done'] = time.localtime()[2]
         log('budzenie swiatlem: pelna jasnosc')
         return
     if wiz(wake_pilot(max(p, 0))) is None and not wl.get('err'):
@@ -812,11 +813,13 @@ def tick_rules(sync, q):
     # --- wstałem: telefon zdjęty rano ---
     if was and not asleep and ph and ph.get('e') == 'up':
         log('rano: telefon zdjety')
-        # wstałem: lampka od razu na pełną jasność, także gdy rozjaśnianie jeszcze się nie zaczęło
+        # wstałem i wychodzę z sypialni: lampka off na każdym etapie rozjaśniania (a jeśli się nie zaczęło, już nie ruszy)
         if PLAN['wake_light'] and PLAN.get('wiz_bed'):
+            was_on = state.get('wl') is not None or state.get('wl_done') == time.localtime()[2]
             state['wl'] = None
-            wiz(wake_pilot(1.0))
-            log('budzenie swiatlem: wstalem, pelna jasnosc')
+            ok = wiz({'state': False}) is not None  # wysyłamy zawsze (np. po restarcie płytki), lampka już wyłączona nic nie robi
+            if was_on:
+                log('budzenie swiatlem: wstalem, lampka off' if ok else 'lampka sypialnia nie odpowiada (%s)' % state.get('wiz_err'))
         # tryb dzienny: nawilżacz na stałą wilgotność (dalej moc ustawia reguła wg Qingpinga), oczyszczacz na auto
         dev_set('salon_hum', 'on', True)
         if dev_set('salon_hum', 'sh_mode', 0, 'rano: salon nawilzacz tryb dzienny'):
