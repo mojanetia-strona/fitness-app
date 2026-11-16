@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.48'
+VERSION = '1.0.49'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -53,8 +53,9 @@ PLAN = {
     'wiz_bed': '192.168.100.37',
     'wake_light': True,
     'wake_light_min': 30,   # tyle trwa rozjaśnianie (od ciemnego pomarańczu do jasnej bieli)
-    'wake_light_wd': 420,   # w tygodniu start nie wcześniej niż 7:00 ...
-    'wake_light_we': 480,   # ... w weekend nie wcześniej niż 8:00 (wcześniej tylko pod budzik z kalendarza)
+    'wake_light_wd': 420,   # zapas, gdy nie znamy pory zaśnięcia: w tygodniu start nie wcześniej niż 7:00 ...
+    'wake_light_we': 480,   # ... w weekend nie wcześniej niż 8:00
+    'wake_light_sleep': 495,  # start nie wcześniej niż 8 h snu + 15 min na zaśnięcie od odłożenia telefonu
 }
 
 cfg = {}
@@ -267,7 +268,12 @@ def wake_alarm_min(sync):
 def wake_light_start(sync, weekend):
     """Kiedy dziś zacząć rozjaśnianie (minuty od północy)."""
     fade = PLAN['wake_light_min']
-    start = max(wake_min(sync, weekend) - fade, PLAN['wake_light_we' if weekend else 'wake_light_wd'])
+    sa = state.get('sleep_at')
+    if sa is not None:
+        floor = (sa + PLAN['wake_light_sleep']) % 1440  # np. telefon odłożony 22:00 -> najwcześniej 6:15
+    else:
+        floor = PLAN['wake_light_we' if weekend else 'wake_light_wd']
+    start = max(wake_min(sync, weekend) - fade, floor)
     am = wake_alarm_min(sync)
     if am is not None and am - fade < start:
         start = am - fade  # budzik z kalendarza: o godzinie budzika ma być już jasno
@@ -770,7 +776,7 @@ def day_key():
     return '%04d%02d%02d' % (tm[0], tm[1], tm[2])
 
 
-SAVE_KEYS = ('asleep', 'bed_off_at', 'bed_eve', 'night_on', 'bed_pause', 'air', 'wl')
+SAVE_KEYS = ('asleep', 'bed_off_at', 'bed_eve', 'night_on', 'bed_pause', 'air', 'wl', 'sleep_at')
 
 
 def save_state():
@@ -826,6 +832,11 @@ def tick_rules(sync, q):
     # --- zasypianie: telefon odłożony na noc ---
     if asleep and not was:
         log('noc: telefon odlozony')
+        try:
+            _, _, _, h, mi = parse_iso(ph['t'])
+            state['sleep_at'] = h * 60 + mi  # pora odłożenia telefonu: od niej liczymy 8 h snu
+        except Exception:
+            state['sleep_at'] = mins()
         dev_set('bed_hum', 'on', False, 'sypialnia nawilzacz off')
         if PLAN.get('lamp_salon'):
             plug_set(PLAN['lamp_salon'], False, 'lampa salon off')
@@ -848,7 +859,7 @@ def tick_rules(sync, q):
             trv_target('salon', PLAN['salon_day'])
         if m >= wm - PLAN['bed_pre_min'] and once('bed_heat'):
             trv_target('bed', PLAN['bed_morning'])
-        # budzenie światłem: start nie wcześniej niż 7:00 / 8:00 (weekend), wcześniej tylko pod budzik z kalendarza
+        # budzenie światłem: start nie wcześniej niż 8 h 15 min od odłożenia telefonu, wcześniej tylko pod budzik z kalendarza
         if PLAN['wake_light'] and PLAN.get('wiz_bed') and sync:
             ws = wake_light_start(sync, weekend)
             if ws <= m < ws + PLAN['wake_light_min'] and once('wake_light'):
