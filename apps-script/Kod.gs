@@ -341,6 +341,7 @@ function doGet(e) {
   if (p.action === 'daily') return json_(dailyFromShortcut_(ss, p));
   if (p.action === 'phone') return json_(phoneEvent_(ss, p.e));
   if (p.action === 'gym') return json_(gymEvent_(ss, p.e, p.g));
+  if (p.action === 'away') return json_(awayEvent_(ss, p.e));
   if (p.action === 'esp') return json_(espSync_(ss, p));
   if (p.action === 'ean') return json_(eanLookup_(ss, p.code)); // test z przeglądarki
   if (p.action === 'diet') return json_(Object.assign({ ok: true }, dietRange_(ss, p.from || '', p.to || ''), { gym: gymRecent_(ss) }));
@@ -889,6 +890,18 @@ function domLogCleanup_(lg) {
   if (old > 0) lg.deleteRows(2, old);
 }
 
+/* ================= ODDALENIE OD DOMU (robot sprzątający) ================= */
+// Skróty iOS: ?action=away&token=…&e=out (wyjście z promienia 1,5 km od domu) / e=in (powrót w ten promień).
+// Płytka przy synchronizacji dostaje ostatnie zdarzenie i uruchamia robota (raz dziennie, 7:00–21:00).
+function awayEvent_(ss, e) {
+  e = String(e || '').toLowerCase(); if (e !== 'out' && e !== 'in') return { ok: false, error: 'e=out albo e=in' };
+  const t = Utilities.formatDate(new Date(), TZ, "yyyy-MM-dd'T'HH:mm:ss");
+  PropertiesService.getScriptProperties().setProperty('AWAY_LAST', JSON.stringify({ e: e, t: t }));
+  const lg = ss.getSheetByName('Dom');
+  if (lg) lg.appendRow([new Date(), e === 'out' ? 'telefon: dalej niz 1,5 km od domu' : 'telefon: z powrotem blisko domu']);
+  return { ok: true, e: e, t: t };
+}
+
 /* ================= PŁYTKA ESP32 (automatyka domu) ================= */
 // ?action=esp&token=…[&kg=82.4][&log=tekst]
 // Zwraca ostatnie zdarzenie ładowarki i typową godzinę zdjęcia telefonu (dni robocze / weekend, mediana z 21 dni).
@@ -926,6 +939,8 @@ function espSync_(ss, p) {
   out.wake = { wd: med(vals.filter(v => !v.we).map(v => v.min)), we: med(vals.filter(v => v.we).map(v => v.min)), days: days };
   // budziki z kalendarza ustawione wieczorem (płytka zaczyna budzenie światłem tak, żeby o budziku było jasno)
   try { out.alarms = JSON.parse(PropertiesService.getScriptProperties().getProperty('ALARMS_NEXT') || '[]').map(a => a.t); } catch (e) { out.alarms = []; }
+  // ostatnie oddalenie od domu / powrót (robot sprzątający)
+  try { const aw = PropertiesService.getScriptProperties().getProperty('AWAY_LAST'); if (aw) out.away = JSON.parse(aw); } catch (e) { }
   return out;
 }
 

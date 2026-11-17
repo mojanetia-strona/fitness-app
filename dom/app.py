@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.51'
+VERSION = '1.0.52'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -56,6 +56,13 @@ PLAN = {
     'wake_light_wd': 420,   # zapas, gdy nie znamy pory zaśnięcia: w tygodniu start nie wcześniej niż 7:00 ...
     'wake_light_we': 480,   # ... w weekend nie wcześniej niż 8:00
     'wake_light_sleep': 495,  # start nie wcześniej niż 8 h snu + 15 min na zaśnięcie od odłożenia telefonu
+    # --- robot sprzątający Xiaomi H50 Pro: rusza, gdy oddalę się od domu (Skrót iOS: wyjście z promienia 1,5 km) ---
+    'robot': True,
+    'robot_from': 420,      # najwcześniej 7:00
+    'robot_to': 1260,       # najpóźniej start do 21:00
+    'robot_every': 1,       # co ile dni (1 = codziennie, 2 = co drugi dzień)
+    'robot_fresh': 45,      # zdarzenie „oddaliłem się” ważne tyle minut (np. wyjście o 6:50 uruchomi robota o 7:00)
+    'robot_start': [2, 1],  # MIoT: usługa vacuum, akcja start-sweep (tryb taki, jak ustawiony w Xiaomi Home)
 }
 
 cfg = {}
@@ -776,7 +783,42 @@ def day_key():
     return '%04d%02d%02d' % (tm[0], tm[1], tm[2])
 
 
-SAVE_KEYS = ('asleep', 'bed_off_at', 'bed_eve', 'night_on', 'bed_pause', 'air', 'wl', 'sleep_at')
+SAVE_KEYS = ('asleep', 'bed_off_at', 'bed_eve', 'night_on', 'bed_pause', 'air', 'wl', 'sleep_at', 'robot_ev', 'robot_day')
+
+
+def day_num():
+    tm = now_local()
+    return int(mk(tm[0], tm[1], tm[2], 12) // 86400)
+
+
+def robot_tick(sync, m):
+    """Robot rusza raz na `robot_every` dni, gdy telefon zgłosi oddalenie od domu (> 1,5 km). Kończy sam, powrotu nie przerywamy."""
+    aw = (sync or {}).get('away')
+    if not PLAN['robot'] or not aw or aw.get('e') != 'out' or not dev.get('robot'):
+        return
+    if state.get('robot_ev') == aw.get('t'):
+        return  # to wyjście już obsłużone
+    try:
+        age = local_minutes_since(aw['t'])
+    except Exception:
+        return
+    if age > PLAN['robot_fresh']:
+        state['robot_ev'] = aw['t']
+        return
+    if not (PLAN['robot_from'] <= m < PLAN['robot_to']):
+        return  # poczekamy do pory dziennej, dopóki zdarzenie jest świeże
+    state['robot_ev'] = aw['t']
+    last = state.get('robot_day')
+    if last is not None and day_num() - last < PLAN['robot_every']:
+        log('robot: wyjscie z domu, ale juz sprzatal (dzien %s)' % last)
+        return
+    s, a = PLAN['robot_start']
+    try:
+        dev['robot'].action(s, a)
+        state['robot_day'] = day_num()
+        log('robot: wyszedlem z domu, start sprzatania')
+    except Exception as e:
+        log('robot: blad startu %s' % e)
 
 
 def save_state():
@@ -828,6 +870,9 @@ def tick_rules(sync, q):
     if was and not asleep and m < 240:
         asleep = True  # zerknięcie na telefon w nocy to jeszcze nie pobudka
     state['asleep'] = asleep
+
+    # --- robot: wyszedłem dalej niż 1,5 km od domu ---
+    robot_tick(sync, m)
 
     # --- zasypianie: telefon odłożony na noc ---
     if asleep and not was:
@@ -985,7 +1030,7 @@ def setup():
     with open('config.json') as f:
         cfg = json.load(f)
     PLAN.update(cfg.get('plan', {}))
-    for name in ('qingping', 'salon_hum', 'salon_pur', 'bed_hum'):
+    for name in ('qingping', 'salon_hum', 'salon_pur', 'bed_hum', 'robot'):
         d = cfg.get('devices', {}).get(name)
         if d and d.get('ip') and d.get('token') and len(d['token']) == 32:
             dev[name] = Device(d['ip'], d['token'], name)
@@ -1010,6 +1055,12 @@ def setup():
             log('lampka sypialnia ok (%s, %s%%)' % ('wl' if x.get('state') else 'wyl', x.get('dimming')))
         else:
             log('lampka sypialnia nie odpowiada (%s)' % state.get('wiz_err'))
+    if dev.get('robot'):
+        try:
+            info = dev['robot'].call('miIO.info', [], 2) or {}
+            log('robot ok (model %s, fw %s)' % (info.get('model'), info.get('fw_ver')))
+        except Exception as e:
+            log('robot nie odpowiada (%s)' % e)
     if not state.get('pur_model') and dev.get('salon_pur'):
         try:
             state['pur_model'] = (dev['salon_pur'].call('miIO.info', [], 1) or {}).get('model')

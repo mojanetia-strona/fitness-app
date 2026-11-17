@@ -99,6 +99,14 @@ class Device:
             out.append(v)
         return out
 
+    def action(self, siid, aiid, args=None):
+        """Akcja MIoT (np. start sprzątania robota)."""
+        did = str(self.did or 'x')
+        res = self.call('action', {'did': did, 'siid': siid, 'aiid': aiid, 'in': args or []})
+        if isinstance(res, dict) and res.get('code', 0) != 0:
+            raise OSError('action %s %d.%d: %s' % (self.name, siid, aiid, res))
+        return res
+
     def set(self, siid, piid, value):
         did = str(self.did or 'x')
         res = self.call('set_properties', [{'did': did, 'siid': siid, 'piid': piid, 'value': value}])
