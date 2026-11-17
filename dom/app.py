@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.52'
+VERSION = '1.0.53'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -42,6 +42,8 @@ PLAN = {
     'night_late': 1350,     # telefon odłożony wcześniej, ale nadal leży o 22:30 = też noc
     'rh_low': 48,           # salon: poniżej tej wilgotności (Qingping) nawilżacz na mocno
     'rh_ok': 50,            # salon: od tej wilgotności nawilżacz wraca do stałej wilgotności
+    'pm_hi': 20,            # salon: PM2.5 z Qingpinga powyżej -> oczyszczacz bieg 3
+    'pm_mid': 8,            # ... powyżej -> bieg 2, do tej wartości bieg 1 (cicho)
     'rh_target': 50,        # cel stałej wilgotności w salonie
     'bed_rh_hi': 55,        # sypialnia: przy tylu % nawilżacz pauza
     'bed_rh_lo': 47,        # sypialnia: przy tylu % nawilżacz wraca
@@ -371,7 +373,8 @@ P = {
     'q_rh': (3, 1), 'q_pm25': (3, 4), 'q_t': (3, 7), 'q_co2': (3, 8),
     'on': (2, 1),
     'sh_mode': (2, 3), 'sh_target': (2, 5),          # salon nawilżacz 600ek: 0 stała, 1 sen, 2 mocno
-    'sp_mode': (2, 4),                               # salon oczyszczacz (MIoT): 0 auto, 1 nocny, 2 ulubiony
+    'sp_mode': (2, 4),                               # salon oczyszczacz xiaomi.airp.mb5: 0 auto, 3 nocny, 5 ulubiony, 6 ręczny bieg
+    'sp_fan': (2, 5),                                # bieg w trybie ręcznym: 0 = 1, 1 = 2, 2 = 3
     'bh_mode': (2, 5),                               # sypialnia deerma jsq2w: 1 poziom 1, 2 poziom 2, 3 poziom 3, 4 stała wilgotność
     'bh_rh': (3, 1),                                 # sypialnia: wilgotność z czujnika nawilżacza
 }
@@ -892,7 +895,7 @@ def tick_rules(sync, q):
         dev_set('salon_hum', 'on', True)
         dev_set('salon_hum', 'sh_mode', 1, 'salon nawilzacz tryb nocny')
         dev_set('salon_pur', 'on', True)
-        dev_set('salon_pur', 'sp_mode', 1, 'salon oczyszczacz tryb nocny')
+        dev_set('salon_pur', 'sp_mode', 3, 'salon oczyszczacz tryb nocny')
         trv_target('salon', PLAN['salon_night'])
         trv_target('bed', PLAN['bed_night'])
         state['night_on'] = True
@@ -929,7 +932,7 @@ def tick_rules(sync, q):
         if dev_set('salon_hum', 'sh_mode', 0, 'rano: salon nawilzacz tryb dzienny'):
             dev_set('salon_hum', 'sh_target', PLAN['rh_target'])
         dev_set('salon_pur', 'on', True)
-        dev_set('salon_pur', 'sp_mode', 0, 'rano: salon oczyszczacz tryb dzienny (auto)')
+        dev_set('salon_pur', 'sp_mode', 0, 'rano: salon oczyszczacz tryb dzienny')  # bieg ustawi reguła wg Qingpinga
         trv_target('salon', PLAN['salon_day'])
         state['bed_off_at'] = time.time() + PLAN['bed_after_min'] * 60
         state['night_on'] = False
@@ -955,6 +958,27 @@ def tick_rules(sync, q):
             elif rh >= PLAN['rh_ok'] and mode == 2:
                 if dev_set('salon_hum', 'sh_mode', 0, 'salon nawilzacz stala wilgotnosc (RH %d)' % rh):
                     dev_set('salon_hum', 'sh_target', PLAN['rh_target'])
+
+    # --- salon: bieg oczyszczacza według PM2.5 z Qingpinga (jak nawilżacz według wilgotności) ---
+    if not air('s') and not asleep:
+        p_on, p_mode, p_fan = dev_get('salon_pur', ['on', 'sp_mode', 'sp_fan'])
+        if p_on and pm25 is None and p_mode == 6:
+            dev_set('salon_pur', 'sp_mode', 0, 'qingping milczy: salon oczyszczacz na auto (wlasny czujnik)')
+        elif p_on and pm25 is not None and p_mode in (0, 6):
+            cur = (p_fan + 1) if (p_mode == 6 and p_fan is not None) else 0
+            if pm25 > PLAN['pm_hi'] or (cur == 3 and pm25 > PLAN['pm_hi'] - 5):
+                want = 3
+            elif pm25 > PLAN['pm_mid'] or (cur >= 2 and pm25 > PLAN['pm_mid'] - 3):
+                want = 2
+            else:
+                want = 1
+            # w górę od razu, w dół najwyżej co 10 min (żeby nie skakał)
+            if want != cur and (cur == 0 or want > cur or time.time() - state.get('pur_lvl_at', 0) > 600):
+                ok = True
+                if p_mode != 6:
+                    ok = dev_set('salon_pur', 'sp_mode', 6)
+                if ok and dev_set('salon_pur', 'sp_fan', want - 1, 'salon oczyszczacz bieg %d (PM2.5 %d)' % (want, pm25)):
+                    state['pur_lvl_at'] = time.time()
 
     # --- sypialnia: nawilżacz sam przestrzeliwuje cel, więc pilnuje go płytka (jego własny czujnik) ---
     # włączony przeze mnie lub przez Google Home: przy >= 55% pauza (off), przy <= 47% z powrotem on (tylko gdy jestem w domu).
