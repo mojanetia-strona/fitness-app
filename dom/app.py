@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.49'
+VERSION = '1.0.50'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -1021,7 +1021,7 @@ def run():
         try:
             force = NOW[0]
             NOW[0] = False
-            if force or time.time() - last_sync >= 30:
+            if force or time.time() - last_sync >= 120:  # co 2 min; pobudka z wagi i tak synchronizuje od razu (force)
                 last_sync = time.time()
                 try:
                     sync = gas({})
