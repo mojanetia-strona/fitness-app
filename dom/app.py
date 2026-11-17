@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.50'
+VERSION = '1.0.51'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -949,7 +949,18 @@ def tick_rules(sync, q):
     # --- temperatura z Qingpinga do głowicy w salonie (co 5 min) ---
     if PLAN['ext_temp'] and t is not None and time.time() - state.get('ext_at', 0) > 300:
         state['ext_at'] = time.time()
+        state['ext_off'] = False
         trv_ext('salon', t)
+    # Qingping milczy ponad 15 min: głowica nie może grzać według starej temperatury (sama nie wraca do swojego czujnika),
+    # więc kasujemy temperaturę zewnętrzną; gdy Qingping wróci, wyżej znów ją wysyłamy
+    if PLAN['ext_temp'] and t is None and not state.get('ext_off') and time.time() - state.get('ext_at', time.time()) > 900:
+        tid = cfg.get('trv', {}).get('salon')
+        try:
+            trv_call(tid, 'TRV.SetExternalTemperature', {'id': 0})
+            state['ext_off'] = True
+            log('qingping milczy: grzejnik salon wraca do wlasnego czujnika')
+        except Exception as e:
+            print('ext off err', e)
 
 
 def check_update():
