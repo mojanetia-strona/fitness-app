@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.55'
+VERSION = '1.0.56'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -253,8 +253,14 @@ def wiz(params, method='setPilot'):
 
 
 def wake_pilot(p):
-    """Wygląd światła w chwili p (0..1) rozjaśniania: bardzo długo ciemno i ciepło, jasno dopiero na końcu."""
+    """Wygląd światła w chwili p (0..1) rozjaśniania: bardzo długo ciemno i ciepło, jasno dopiero na końcu.
+    Poziom zgodności (state['wiz_lvl']): 0 kolor + 2200 K, 1 sama biel od 2700 K (żarówka bez koloru), 2 sama jasność."""
     dim = int(10 + 90 * p ** 2.5 + 0.5)  # WiZ: 10% to najciemniej
+    lvl = state.get('wiz_lvl', 0)
+    if lvl >= 2:
+        return {'state': True, 'dimming': dim}
+    if lvl == 1:
+        return {'state': True, 'dimming': dim, 'temp': (2700 + int(800 * p ** 1.5)) // 100 * 100}
     if p < 0.4:
         # najpierw ciemny pomarańcz (jak świt), pierwsze ~12 min na minimum jasności
         return {'state': True, 'dimming': dim, 'r': 255, 'g': int(25 + 75 * p / 0.4), 'b': 0}
@@ -315,12 +321,19 @@ def wake_light_tick():
     state['wl_at'] = time.time()
     p = (time.time() - wl['t0']) / (wl.get('min', PLAN['wake_light_min']) * 60.0)
     if p >= 1:
-        wiz(wake_pilot(1.0))
+        if wiz(wake_pilot(1.0)) is None and 'Invalid params' in str(state.get('wiz_err')):
+            state['wiz_lvl'] = 2
+            wiz(wake_pilot(1.0))
         state['wl'] = None
         state['wl_done'] = time.localtime()[2]
         log('budzenie swiatlem: pelna jasnosc')
         return
     ok = wiz(wake_pilot(max(p, 0))) is not None
+    while not ok and 'Invalid params' in str(state.get('wiz_err')) and state.get('wiz_lvl', 0) < 2:
+        # żarówka nie zna któregoś ustawienia (np. kolorów): upraszczamy i próbujemy od razu jeszcze raz
+        state['wiz_lvl'] = state.get('wiz_lvl', 0) + 1
+        log('lampka: upraszczam ustawienia (poziom %d)' % state['wiz_lvl'])
+        ok = wiz(wake_pilot(max(p, 0))) is not None
     if ok and not wl.get('half') and p >= 0.5:
         wl = dict(wl)
         wl['half'] = 1
@@ -810,7 +823,7 @@ def day_key():
     return '%04d%02d%02d' % (tm[0], tm[1], tm[2])
 
 
-SAVE_KEYS = ('asleep', 'bed_off_at', 'bed_eve', 'night_on', 'bed_pause', 'air', 'wl', 'sleep_at', 'robot_ev', 'robot_day')
+SAVE_KEYS = ('asleep', 'bed_off_at', 'bed_eve', 'night_on', 'bed_pause', 'air', 'wl', 'sleep_at', 'robot_ev', 'robot_day', 'wiz_lvl')
 
 
 def day_num():
@@ -1100,7 +1113,8 @@ def setup():
         r = wiz({}, 'getPilot')
         if r and r.get('result'):
             x = r['result']
-            log('lampka sypialnia ok (%s, %s%%)' % ('wl' if x.get('state') else 'wyl', x.get('dimming')))
+            sc = (wiz({}, 'getSystemConfig') or {}).get('result') or {}
+            log('lampka sypialnia ok (%s, %s%%, model %s)' % ('wl' if x.get('state') else 'wyl', x.get('dimming'), sc.get('moduleName')))
         else:
             log('lampka sypialnia nie odpowiada (%s)' % state.get('wiz_err'))
     if dev.get('robot'):
