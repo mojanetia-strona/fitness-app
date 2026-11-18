@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.53'
+VERSION = '1.0.54'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -236,7 +236,12 @@ def wiz(params, method='setPilot'):
             s.settimeout(1.5)
             s.sendto(msg, socket.getaddrinfo(ip, 38899)[0][-1])
             data = s.recv(512)
-            return json.loads(data)
+            r = json.loads(data)
+            if isinstance(r, dict) and r.get('error'):
+                # żarówka odpowiedziała, ale odrzuciła polecenie
+                state['wiz_err'] = 'odrzucila: %s' % str(r['error'])[:80]
+                return None
+            return r
         except Exception as e:
             last = e
             time.sleep(0.5)
@@ -302,7 +307,13 @@ def wake_light_tick():
         state['wl_done'] = time.localtime()[2]
         log('budzenie swiatlem: pelna jasnosc')
         return
-    if wiz(wake_pilot(max(p, 0))) is None and not wl.get('err'):
+    ok = wiz(wake_pilot(max(p, 0))) is not None
+    if ok and not wl.get('half') and p >= 0.5:
+        wl = dict(wl)
+        wl['half'] = 1
+        state['wl'] = wl
+        log('budzenie swiatlem: polowa (lampka odpowiada)')
+    if not ok and not wl.get('err'):
         wl = dict(wl)
         wl['err'] = 1
         state['wl'] = wl
