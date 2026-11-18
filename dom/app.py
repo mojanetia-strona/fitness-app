@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.59'
+VERSION = '1.0.60'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -256,7 +256,7 @@ def wake_pilot(p):
     """Wygląd światła w chwili p (0..1) rozjaśniania: bardzo długo ciemno i ciepło, jasno dopiero na końcu.
     Poziom zgodności (state['wiz_lvl']): 0 kolor + 2200 K, 1 sama biel od 2700 K (żarówka bez koloru), 2 sama jasność."""
     dim = int(10 + 90 * p ** 2.5 + 0.5)  # WiZ: 10% to najciemniej
-    lvl = state.get('wiz_lvl', 0)
+    lvl = state.get('wiz_lvl') or 0
     if lvl >= 2:
         return {'state': True, 'dimming': dim}
     if lvl == 1:
@@ -368,9 +368,9 @@ def wake_light_tick():
         log('budzenie swiatlem: pelna jasnosc')
         return
     ok = wiz(wake_pilot(max(p, 0))) is not None
-    while not ok and 'Invalid params' in str(state.get('wiz_err')) and state.get('wiz_lvl', 0) < 2:
+    while not ok and 'Invalid params' in str(state.get('wiz_err')) and (state.get('wiz_lvl') or 0) < 2:
         # żarówka nie zna któregoś ustawienia (np. kolorów): upraszczamy i próbujemy od razu jeszcze raz
-        state['wiz_lvl'] = state.get('wiz_lvl', 0) + 1
+        state['wiz_lvl'] = (state.get('wiz_lvl') or 0) + 1
         log('lampka: upraszczam ustawienia (poziom %d)' % state['wiz_lvl'])
         ok = wiz(wake_pilot(max(p, 0))) is not None
     if ok and not wl.get('half') and p >= 0.5:
