@@ -1,11 +1,20 @@
 /* ================= SIŁOWNIA (Skróty iOS: przybycie / wyjście) ================= */
 // ?action=gym&token=…&e=in|out&g=Nazwa siłowni. Apka przy otwarciu dopina wejście do treningu i zamyka go godziną wyjścia minus 15 min.
+const GYM_PASS_MIN = 10; // krótsza wizyta niż tyle minut = przejazd obok, nie trening
 function gymSheet_(ss) {
   return ss.getSheetByName('Siłownia') || (function () { const s = ss.insertSheet('Siłownia'); s.appendRow(['Czas', 'Zdarzenie', 'Siłownia']); s.setFrozenRows(1); s.getRange('A:A').setNumberFormat('d mmm yyyy HH:mm'); return s; })();
 }
 function gymEvent_(ss, e, g) {
   e = String(e || '').toLowerCase(); if (e !== 'in' && e !== 'out') return { ok: false, error: 'e=in albo e=out' };
-  gymSheet_(ss).appendRow([new Date(), e === 'in' ? 'wejście' : 'wyjście', String(g || '').slice(0, 60)]);
+  const sh = gymSheet_(ss), now = new Date();
+  // Przejazd obok siłowni: wyjście mniej niż 10 min po wejściu = usuwamy oba wpisy, nic nie zapisujemy.
+  if (e === 'out' && sh.getLastRow() > 1) {
+    const last = sh.getRange(sh.getLastRow(), 1, 1, 2).getValues()[0];
+    if (last[1] === 'wejście' && last[0] instanceof Date && now - last[0] < GYM_PASS_MIN * 60000) {
+      sh.deleteRow(sh.getLastRow()); return { ok: true, pominieto: 'przejazd' };
+    }
+  }
+  sh.appendRow([now, e === 'in' ? 'wejście' : 'wyjście', String(g || '').slice(0, 60)]);
   return { ok: true };
 }
 function gymRecent_(ss) {
