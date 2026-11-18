@@ -948,6 +948,8 @@ function espSync_(ss, p) {
 }
 // Uruchom z edytora: płytka przy najbliższej synchronizacji (do 2 min) odpali skrócone (3 min) budzenie światłem.
 function testBudzenia() { PropertiesService.getScriptProperties().setProperty('ESP_CMD', 'wake_test'); }
+// Uruchom z edytora: płytka sprawdzi, które ustawienia przyjmuje żarówka w sypialni (wynik w zakładce Dom).
+function testLampki() { PropertiesService.getScriptProperties().setProperty('ESP_CMD', 'wiz_probe'); }
 
 /* ================= KROKI I SEN ================= */
 // Skróty iOS: ?action=daily&token=…&steps=…&sleep=…&kg=…  (każdy parametr opcjonalny)

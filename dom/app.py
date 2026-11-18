@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.57'
+VERSION = '1.0.58'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -235,7 +235,7 @@ def wiz(params, method='setPilot'):
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.settimeout(1.5)
             s.sendto(msg, socket.getaddrinfo(ip, 38899)[0][-1])
-            data = s.recv(512)
+            data = s.recv(2048)
             r = json.loads(data)
             if isinstance(r, dict) and r.get('error'):
                 # żarówka odpowiedziała, ale odrzuciła polecenie
@@ -309,6 +309,21 @@ def remote_cmd(sync):
         log('test budzenia swiatlem: 3 min zamiast 30')
         state['wl'] = {'t0': time.time(), 'min': 3}
         state['wl_at'] = 0
+    elif c == 'wiz_probe':
+        # sprawdzenie, które ustawienia żarówka przyjmuje (każde osobno, wynik w logu)
+        tests = [{'state': True}, {'dimming': 10}, {'state': True, 'dimming': 10},
+                 {'r': 255, 'g': 25, 'b': 0}, {'r': 255, 'g': 25, 'b': 0, 'dimming': 10},
+                 {'state': True, 'r': 255, 'g': 25, 'b': 0, 'dimming': 10},
+                 {'temp': 2200}, {'temp': 2200, 'dimming': 10}, {'state': True, 'temp': 3500, 'dimming': 100}]
+        out = []
+        for t in tests:
+            ok = wiz(t) is not None
+            out.append('%s=%s' % (','.join(sorted(t.keys())), 'ok' if ok else str(state.get('wiz_err'))[:40]))
+            time.sleep(2)
+        wiz({'state': False})
+        log('lampka test: ' + ' | '.join(out))
+        mc = wiz({}, 'getModelConfig')
+        log('lampka mozliwosci: %s' % (json.dumps((mc or {}).get('result') or state.get('wiz_err'))[:400]))
     else:
         log('nieznane polecenie: %s' % c)
 
