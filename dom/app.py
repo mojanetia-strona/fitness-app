@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.54'
+VERSION = '1.0.55'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -294,13 +294,26 @@ def wake_light_start(sync, weekend):
     return max(start, 0)
 
 
+def remote_cmd(sync):
+    # polecenie ze skryptu (jednorazowe), np. test budzenia światłem uruchomiony z edytora skryptu
+    c = (sync or {}).get('cmd')
+    if not c:
+        return
+    if c == 'wake_test':
+        log('test budzenia swiatlem: 3 min zamiast 30')
+        state['wl'] = {'t0': time.time(), 'min': 3}
+        state['wl_at'] = 0
+    else:
+        log('nieznane polecenie: %s' % c)
+
+
 def wake_light_tick():
     """Co 15 s podczas rozjaśniania: kolejny krok jasności."""
     wl = state.get('wl')
     if not wl or time.time() - state.get('wl_at', 0) < 15:
         return
     state['wl_at'] = time.time()
-    p = (time.time() - wl['t0']) / (PLAN['wake_light_min'] * 60.0)
+    p = (time.time() - wl['t0']) / (wl.get('min', PLAN['wake_light_min']) * 60.0)
     if p >= 1:
         wiz(wake_pilot(1.0))
         state['wl'] = None
@@ -1123,6 +1136,7 @@ def run():
                 try:
                     sync = gas({})
                     state['sync_fail'] = 0
+                    remote_cmd(sync)
                 except Exception as e:
                     print('sync err', e)
                     # brak łączności z arkuszem przez ok. 10 min: zapisz przyczynę i zrestartuj (płytka sama wraca do pracy)
