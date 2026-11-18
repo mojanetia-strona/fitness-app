@@ -950,6 +950,7 @@ function espSync_(ss, p) {
 function testBudzenia() { PropertiesService.getScriptProperties().setProperty('ESP_CMD', 'wake_test'); }
 // Uruchom z edytora: płytka sprawdzi, które ustawienia przyjmuje żarówka w sypialni (wynik w zakładce Dom).
 function testLampki() { PropertiesService.getScriptProperties().setProperty('ESP_CMD', 'wiz_probe'); }
+function testLampki2() { PropertiesService.getScriptProperties().setProperty('ESP_CMD', 'wiz_probe2'); }
 
 /* ================= KROKI I SEN ================= */
 // Skróty iOS: ?action=daily&token=…&steps=…&sleep=…&kg=…  (każdy parametr opcjonalny)

@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.58'
+VERSION = '1.0.59'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -309,6 +309,30 @@ def remote_cmd(sync):
         log('test budzenia swiatlem: 3 min zamiast 30')
         state['wl'] = {'t0': time.time(), 'min': 3}
         state['wl_at'] = 0
+    elif c == 'wiz_probe2':
+        # te same ustawienia, różne formy wiadomości (nowsze żarówki WiZ bywają wybredne)
+        import socket
+        ip = PLAN.get('wiz_bed')
+        msgs = ['{"method":"setPilot","params":{"state":true}}',
+                '{"id":1,"method":"setPilot","params":{"state":true}}',
+                '{"method":"setState","params":{"state":true}}',
+                '{"id":1,"method":"setState","params":{"state":true}}',
+                '{"method":"setPilot","params":{"dimming":50}}',
+                '{"method":"setPilot","params":{"src":"udp","state":true}}',
+                '{"method":"setState","params":{"state":false}}']
+        out = []
+        for i, mtxt in enumerate(msgs):
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.settimeout(2)
+            try:
+                s.sendto(mtxt.encode(), socket.getaddrinfo(ip, 38899)[0][-1])
+                out.append('%d:%s' % (i, s.recv(2048).decode()[:70]))
+            except Exception as e:
+                out.append('%d:brak (%s)' % (i, e))
+            finally:
+                s.close()
+            time.sleep(2)
+        log('lampka test2: ' + ' | '.join(out))
     elif c == 'wiz_probe':
         # sprawdzenie, które ustawienia żarówka przyjmuje (każde osobno, wynik w logu)
         tests = [{'state': True}, {'dimming': 10}, {'state': True, 'dimming': 10},
