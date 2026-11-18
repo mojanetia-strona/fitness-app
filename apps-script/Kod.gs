@@ -941,8 +941,13 @@ function espSync_(ss, p) {
   try { out.alarms = JSON.parse(PropertiesService.getScriptProperties().getProperty('ALARMS_NEXT') || '[]').map(a => a.t); } catch (e) { out.alarms = []; }
   // ostatnie oddalenie od domu / powrót (robot sprzątający)
   try { const aw = PropertiesService.getScriptProperties().getProperty('AWAY_LAST'); if (aw) out.away = JSON.parse(aw); } catch (e) { }
+  // jednorazowe polecenie dla płytki (np. z funkcji testBudzenia), oddawane przy najbliższej synchronizacji
+  const pr = PropertiesService.getScriptProperties(), cmd = pr.getProperty('ESP_CMD');
+  if (cmd) { out.cmd = cmd; pr.deleteProperty('ESP_CMD'); }
   return out;
 }
+// Uruchom z edytora: płytka przy najbliższej synchronizacji (do 2 min) odpali skrócone (3 min) budzenie światłem.
+function testBudzenia() { PropertiesService.getScriptProperties().setProperty('ESP_CMD', 'wake_test'); }
 
 /* ================= KROKI I SEN ================= */
 // Skróty iOS: ?action=daily&token=…&steps=…&sleep=…&kg=…  (każdy parametr opcjonalny)
