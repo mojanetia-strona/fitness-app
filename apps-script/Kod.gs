@@ -845,9 +845,57 @@ function spotifyPlay_(ss, quiet) {
     const r = UrlFetchApp.fetch('https://api.spotify.com/v1/me/player/play?device_id=' + d.id, { method: 'put', headers: h, muteHttpExceptions: true,
       contentType: 'application/json', payload: JSON.stringify({ context_uri: pl.uri }) });
     res = 'gra na ' + d.name + ': ' + pl.name + ' (' + r.getResponseCode() + ')';
+    // zapamiętaj, że dziś grała poranna muzyka i na którym urządzeniu (Komputer ON → Muzyka Poranna OFF)
+    PropertiesService.getScriptProperties().setProperty('MUSIC_ON', JSON.stringify({ d: Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd'), id: d.id }));
   }
   if (!quiet || res.indexOf('gra na') === 0) try { const lg = ss.getSheetByName('Dom'); if (lg) lg.appendRow([new Date(), 'spotify: ' + res]); } catch (e) {}
   return res;
+}
+
+/* Komputer ON → Muzyka Poranna OFF. Płytka widzi, że gniazdko Shelly przy komputerze dostało prąd, i wysyła pc=on.
+   Raz dziennie i tylko, gdy tego dnia grała poranna muzyka: pauza Spotify (tylko jeśli nadal gra na Samsungu),
+   potem MacroDroid na Samsungu rozłącza głośnik (webhook „muzyka_off”, ten sam adres co SAMSUNG_HOOK, inna końcówka;
+   własny adres można podać we właściwości SAMSUNG_HOOK_OFF). */
+function pcOnMusicOff_(ss) {
+  const pr = PropertiesService.getScriptProperties(), today = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
+  let m = null; try { m = JSON.parse(pr.getProperty('MUSIC_ON') || 'null'); } catch (e) { }
+  if (!m || m.d !== today) return 'pominiete (dzis nie grala poranna muzyka)';
+  pr.deleteProperty('MUSIC_ON');
+  let res = 'komputer wlaczony';
+  try {
+    const at = spotifyToken_();
+    if (at) {
+      const h = { Authorization: 'Bearer ' + at };
+      const r = UrlFetchApp.fetch('https://api.spotify.com/v1/me/player', { headers: h, muteHttpExceptions: true });
+      const st = r.getResponseCode() === 200 ? JSON.parse(r.getContentText()) : null;
+      if (st && st.is_playing && st.device && st.device.id === m.id) {
+        const pz = UrlFetchApp.fetch('https://api.spotify.com/v1/me/player/pause?device_id=' + m.id, { method: 'put', headers: h, muteHttpExceptions: true });
+        res += ', spotify pauza (' + pz.getResponseCode() + ')';
+      } else res += ', spotify juz nie gra na Samsungu';
+    }
+  } catch (e) { res += ', spotify blad ' + e.message; }
+  const hook = musicOffHook_();
+  if (hook) {
+    try { Utilities.sleep(1500); const r = UrlFetchApp.fetch(hook, { muteHttpExceptions: true }); res += ', glosnik rozlaczony (' + r.getResponseCode() + ')'; }
+    catch (e) { res += ', macrodroid blad ' + e.message; }
+  }
+  try { const lg = ss.getSheetByName('Dom'); if (lg) lg.appendRow([new Date(), 'muzyka off: ' + res]); } catch (e) { }
+  return res;
+}
+function musicOffHook_() {
+  const pr = PropertiesService.getScriptProperties(), own = pr.getProperty('SAMSUNG_HOOK_OFF');
+  if (own) return own;
+  const h = pr.getProperty('SAMSUNG_HOOK');
+  return h ? h.replace(/\/[^\/?]*(\?.*)?$/, '/muzyka_off') : null;
+}
+// Test z edytora: puść muzykę na Samsungu przez głośnik, wybierz testMuzykaOff i kliknij Uruchom.
+function testMuzykaOff() {
+  const pr = PropertiesService.getScriptProperties(), at = spotifyToken_();
+  let id = '';
+  try { const st = JSON.parse(UrlFetchApp.fetch('https://api.spotify.com/v1/me/player', { headers: { Authorization: 'Bearer ' + at }, muteHttpExceptions: true }).getContentText() || '{}'); id = (st.device || {}).id || ''; } catch (e) { }
+  pr.setProperty('MUSIC_ON', JSON.stringify({ d: Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd'), id: id }));
+  Logger.log('webhook: ' + musicOffHook_());
+  Logger.log(pcOnMusicOff_(SpreadsheetApp.getActiveSpreadsheet()));
 }
 
 /* Pobudka z wagi: jeśli rano (4-13) ważę się, a telefon wciąż leży na ładowarce od nocy, to ważenie liczy się jak zdjęcie telefonu
@@ -916,6 +964,7 @@ function espSync_(ss, p) {
     else out.kg_skipped = Math.round(kg * 100) / 100;
     if (scaleWake_(ss)) out.pobudka_waga = true;
   }
+  if (p.pc === 'on') out.muzyka = pcOnMusicOff_(ss); // płytka: gniazdko przy komputerze dostało prąd
   if (p.log) {
     const lg = ss.getSheetByName('Dom') || (function () { const s = ss.insertSheet('Dom'); s.appendRow(['Czas', 'Wpis']); s.setFrozenRows(1); s.getRange('A:A').setNumberFormat('d mmm yyyy HH:mm'); return s; })();
     lg.appendRow([new Date(), String(p.log).slice(0, 500)]);

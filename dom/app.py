@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.61'
+VERSION = '1.0.62'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -50,6 +50,7 @@ PLAN = {
     'air_max_min': 90,      # wietrzenie: po tylu minutach bez wiadomości z czujnika wracamy do normy (bezpiecznik)
     'ext_temp': True,       # salon: temperatura z Qingpinga do głowicy
     'scale_min': 45.0, 'scale_max': 150.0,
+    'pc_plug': '192.168.100.40',  # gniazdko Shelly głośników Edifier: prąd tylko przy włączonym komputerze (Komputer ON → Muzyka Poranna OFF)
     'lamp_salon': '192.168.100.36',  # gniazdko Shelly „Lampa Salon”: włącza Google Home przy powrocie, płytka gasi na noc
     # --- budzenie światłem: żarówka WiZ „Lampka Sypialnia” (lokalnie, UDP 38899) ---
     'wiz_bed': '192.168.100.37',
@@ -842,6 +843,31 @@ def scale_tick():
 
 NOW = [False]  # wymuszenie natychmiastowej synchronizacji (np. pobudka z wagi)
 
+# ---------- Komputer ON → Muzyka Poranna OFF ----------
+PC = {'on': None, 'evt': False, 't': 0}
+
+
+def pc_tick():
+    # co 15 s stan gniazdka przy komputerze; przejście OFF -> ON = komputer włączony, arkusz wyłącza poranną muzykę
+    ip = PLAN.get('pc_plug')
+    if not ip or time.time() - PC['t'] < 15:
+        return
+    PC['t'] = time.time()
+    try:
+        gc.collect()
+        r = requests.get('http://%s/rpc/Switch.GetStatus?id=0' % ip, timeout=5)
+        try:
+            on = bool(r.json().get('output'))
+        finally:
+            r.close()
+    except Exception:
+        return
+    if PC['on'] is False and on:
+        PC['evt'] = True
+        NOW[0] = True
+        log('komputer wlaczony')
+    PC['on'] = on
+
 
 # ---------- logika ----------
 
@@ -1221,7 +1247,8 @@ def run():
             if force or time.time() - last_sync >= 120:  # co 2 min; pobudka z wagi i tak synchronizuje od razu (force)
                 last_sync = time.time()
                 try:
-                    sync = gas({})
+                    sync = gas({'pc': 'on'} if PC['evt'] else {})
+                    PC['evt'] = False
                     state['sync_fail'] = 0
                     remote_cmd(sync)
                 except Exception as e:
@@ -1243,6 +1270,7 @@ def run():
                 tick_rules(sync, q)
                 save_state()
             scale_tick()
+            pc_tick()
             gw_windows()
             win_tick()
             night_lamp_guard()
