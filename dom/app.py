@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.60'
+VERSION = '1.0.61'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -350,6 +350,20 @@ def remote_cmd(sync):
         log('lampka mozliwosci: %s' % (json.dumps((mc or {}).get('result') or state.get('wiz_err'))[:400]))
     else:
         log('nieznane polecenie: %s' % c)
+
+
+def night_lamp_guard():
+    # po zaniku prądu żarówka WiZ sama się zapala (tak ma zostać, bo bywa zwykłą lampką);
+    # w nocy przez 10 min po starcie płytki gasimy ją, gdy wróci do sieci włączona
+    if not PLAN.get('wiz_bed') or not state.get('asleep') or state.get('wl'):
+        return
+    if time.time() - BOOT_T[0] > 600 or time.time() - state.get('nlg_at', 0) < 20:
+        return
+    state['nlg_at'] = time.time()
+    r = wiz({}, 'getPilot')
+    if r and (r.get('result') or {}).get('state'):
+        if wiz({'state': False}) is not None:
+            log('noc: lampka sypialnia zapalila sie po zaniku pradu, gasze')
 
 
 def wake_light_tick():
@@ -946,6 +960,20 @@ def tick_rules(sync, q):
     was = state.get('asleep')
     # bez odpowiedzi z arkusza nie zgadujemy: zostaje poprzedni stan (inaczej po restarcie noc/pobudka odpalałyby się drugi raz)
     asleep = phone_asleep(ph) if sync else bool(was)
+    if was and not asleep and ph and ph.get('e') == 'up':
+        # pobudka liczy się tylko od zdjęcia telefonu po 4:00 (albo z wagi); zdjęcie sprzed 4:00 nie odpali poranka później.
+        # Zdjęcie w ciągu 10 min od startu płytki to skok prądu (ładowarka gaśnie razem z płytką), nie pobudka.
+        try:
+            _, _, _, eh, emi = parse_iso(ph['t'])
+            ago = local_minutes_since(ph['t'])
+            blip = abs((time.time() - ago * 60) - BOOT_T[0]) < 600
+            if eh * 60 + emi < 240 or blip:
+                asleep = True
+                if blip and not state.get('blip_log'):
+                    state['blip_log'] = 1
+                    log('telefon zdjety tuz po starcie plytki: skok pradu, nie pobudka')
+        except Exception as e:
+            print('wake check', e)
     if was and not asleep and m < 240:
         asleep = True  # zerknięcie na telefon w nocy to jeszcze nie pobudka
     state['asleep'] = asleep
@@ -1172,7 +1200,11 @@ def setup():
             print('pur model err', e)
 
 
+BOOT_T = [0]
+
+
 def run():
+    BOOT_T[0] = time.time()
     setup()
     ble_start()
     sync = None
@@ -1213,6 +1245,7 @@ def run():
             scale_tick()
             gw_windows()
             win_tick()
+            night_lamp_guard()
             wake_light_tick()
             if log_buf and (time.time() - last_report > 120 or len(log_buf) > 8):
                 last_report = time.time()
