@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.62'
+VERSION = '1.0.63'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -66,6 +66,14 @@ PLAN = {
     'robot_every': 1,       # co ile dni (1 = codziennie, 2 = co drugi dzień)
     'robot_fresh': 45,      # zdarzenie „oddaliłem się” ważne tyle minut (np. wyjście o 6:50 uruchomi robota o 7:00)
     'robot_start': [2, 1],  # MIoT: usługa vacuum, akcja start-sweep (tryb taki, jak ustawiony w Xiaomi Home)
+    # --- zasłony w sypialni: 2× SwitchBot Curtain 3 Rod (Bluetooth, bez huba) ---
+    'curtains': True,
+    'cur_left': 'C5:C5:0C:F4:59:35',
+    'cur_right': 'C8:58:63:F2:4C:79',
+    'cur_left_open': 75,    # % otwarcia lewej zasłony (100 = całkiem odsunięta, 0 = zasunięta)
+    'cur_right_open': 70,   # % otwarcia prawej
+    'cur_quiet': 1,         # prędkość cicha (budzenie, zasuwanie na noc)
+    'cur_fast': 255,        # prędkość zwykła (po wstaniu)
 }
 
 cfg = {}
@@ -310,6 +318,10 @@ def remote_cmd(sync):
         log('test budzenia swiatlem: 3 min zamiast 30')
         state['wl'] = {'t0': time.time(), 'min': 3}
         state['wl_at'] = 0
+    elif c in ('cur_open', 'cur_close'):
+        curtains('open' if c == 'cur_open' else 'close', 'test')
+    elif c == 'cur_info':
+        state['cur_chk'] = 0
     elif c == 'wiz_probe2':
         # te same ustawienia, różne formy wiadomości (nowsze żarówki WiZ bywają wybredne)
         import socket
@@ -728,6 +740,7 @@ def win_tick():
 
 def ble_irq(event, data):
     if event != 5:  # _IRQ_SCAN_RESULT
+        sb_irq(event, data)
         return
     try:
         adv = bytes(data[4])
@@ -790,6 +803,147 @@ def ble_resume():
             BLE[0].gap_scan(0, 200000, 100000, True)
         except Exception as e:
             print('ble resume err', e)
+
+
+# ---------- zasłony SwitchBot Curtain 3 (połączenie Bluetooth na czas jednego polecenia) ----------
+SB = {}
+SB_WRITE = 'cba20002'  # charakterystyka poleceń
+SB_NOTIFY = 'cba20003'  # odpowiedzi
+
+
+def sb_irq(event, data):
+    try:
+        if event == 7:  # połączono
+            SB['conn'] = data[0]
+        elif event == 8:  # rozłączono
+            SB['disc'] = True
+        elif event == 11:  # znaleziona charakterystyka
+            u = str(data[4]).lower()
+            if SB_WRITE in u:
+                SB['wh'] = data[2]
+            elif SB_NOTIFY in u:
+                SB['nh'] = data[2]
+        elif event == 12:
+            SB['cdone'] = True
+        elif event == 17:  # zapis potwierdzony (status 0 = ok)
+            SB['wdone'] = data[2]
+        elif event == 18:  # odpowiedź zasłony
+            SB['notify'] = bytes(data[2])
+    except Exception:
+        pass
+
+
+def sb_wait(key, ms):
+    t = time.ticks_ms()
+    while key not in SB:
+        if time.ticks_diff(time.ticks_ms(), t) > ms or (key != 'disc' and SB.get('disc')):
+            return False
+        time.sleep_ms(20)
+    return True
+
+
+def sb_send(mac, payload):
+    """Jedno polecenie do zasłony: połącz, wyślij, odbierz odpowiedź, rozłącz. Zwraca odpowiedź (bytes) albo None."""
+    b = BLE[0]
+    if not b:
+        state['sb_err'] = 'bluetooth wylaczony'
+        return None
+    addr = bytes([int(x, 16) for x in mac.split(':')])
+    ble_pause()
+    try:
+        for attempt in range(3):
+            SB.clear()
+            try:
+                b.gap_connect(0 if attempt == 2 else 1, addr, 8000)  # SwitchBot ma adres losowy statyczny (typ 1)
+            except Exception as e:
+                state['sb_err'] = 'laczenie %s' % e
+                time.sleep_ms(500)
+                continue
+            if not sb_wait('conn', 9000):
+                state['sb_err'] = 'brak polaczenia'
+                try:
+                    b.gap_connect(None)
+                except Exception:
+                    pass
+                continue
+            c = SB['conn']
+            try:
+                b.gattc_discover_characteristics(c, 1, 0xFFFF)
+                if not sb_wait('cdone', 6000) or 'wh' not in SB:
+                    state['sb_err'] = 'brak uslugi zaslony'
+                    continue
+                if 'nh' in SB:
+                    SB.pop('wdone', None)
+                    b.gattc_write(c, SB['nh'] + 1, b'\x01\x00', 1)  # włącz odpowiedzi
+                    sb_wait('wdone', 2000)
+                SB.pop('wdone', None)
+                SB.pop('notify', None)
+                b.gattc_write(c, SB['wh'], payload, 1)
+                if not sb_wait('wdone', 3000) or SB.get('wdone'):
+                    state['sb_err'] = 'zapis nieudany'
+                    continue
+                sb_wait('notify', 2000)
+                return SB.get('notify') or b''
+            finally:
+                try:
+                    b.gap_disconnect(c)
+                except Exception:
+                    pass
+                sb_wait('disc', 2000)
+        return None
+    finally:
+        ble_resume()
+
+
+def cur_side(mac, open_pct, speed):
+    # w protokole zasłony 0 = otwarta, 100 = zamknięta
+    pos = 100 - max(0, min(100, int(open_pct)))
+    r = sb_send(mac, bytes([0x57, 0x0F, 0x45, 0x01, 0x05, speed & 0xFF, pos]))
+    if r is None:
+        return 'blad (%s)' % state.get('sb_err')
+    return 'ok' if (not r or r[0] == 1) else 'odp %s' % ''.join('%02x' % x for x in r)
+
+
+def curtains(want, why, quiet=True):
+    """want: 'open' / 'close'. Przy otwartym oknie w sypialni zasłony stoją; polecenie czeka na zamknięcie okna."""
+    if not PLAN.get('curtains') or not PLAN.get('cur_left'):
+        return
+    if air('b'):
+        if state.get('cur_want') != want:
+            log('zaslony: okno w sypialni otwarte, %s po zamknieciu' % ('otworze' if want == 'open' else 'zasune'))
+        state['cur_want'] = want
+        state['cur_why'] = why
+        return
+    state['cur_want'] = None
+    sp = PLAN['cur_quiet'] if quiet else PLAN['cur_fast']
+    if want == 'open':
+        l = cur_side(PLAN['cur_left'], PLAN['cur_left_open'], sp)
+        p = cur_side(PLAN['cur_right'], PLAN['cur_right_open'], sp)
+    else:
+        l = cur_side(PLAN['cur_left'], 0, sp)
+        p = cur_side(PLAN['cur_right'], 0, sp)
+    state['cur_state'] = want
+    state['cur_day'] = day_key()
+    log('zaslony %s (%s%s): lewa %s, prawa %s' % ('otwieram' if want == 'open' else 'zasuwam', why, ', cicho' if quiet else '', l, p))
+
+
+def curtains_tick():
+    # odłożone polecenie (okno było otwarte) wykonujemy po zamknięciu okna
+    w = state.get('cur_want')
+    if w and not air('b'):
+        curtains(w, (state.get('cur_why') or '') + ', okno zamkniete')
+    # raz na dobę (i po starcie płytki) sprawdzamy baterie zasłon
+    if PLAN.get('curtains') and PLAN.get('cur_left') and BLE[0] and time.time() - BOOT_T[0] > 60 \
+            and time.time() - state.get('cur_chk', 0) > 86400:
+        state['cur_chk'] = time.time()
+        out = []
+        for name, key in (('lewa', 'cur_left'), ('prawa', 'cur_right')):
+            r = sb_send(PLAN[key], b'\x57\x02')
+            if r and len(r) > 1 and r[0] == 1:
+                out.append('%s bateria %d%%%s' % (name, r[1], ' pozycja %d' % r[6] if len(r) > 6 else ''))
+            else:
+                out.append('%s nie odpowiada (%s)' % (name, state.get('sb_err') if r is None else 'odp %s' % r))
+        log('zaslony: ' + ', '.join(out))
 
 
 def ble_start():
@@ -902,7 +1056,8 @@ def day_key():
     return '%04d%02d%02d' % (tm[0], tm[1], tm[2])
 
 
-SAVE_KEYS = ('asleep', 'bed_off_at', 'bed_eve', 'night_on', 'bed_pause', 'air', 'wl', 'sleep_at', 'robot_ev', 'robot_day', 'wiz_lvl')
+SAVE_KEYS = ('asleep', 'bed_off_at', 'bed_eve', 'night_on', 'bed_pause', 'air', 'wl', 'sleep_at', 'robot_ev', 'robot_day', 'wiz_lvl',
+             'cur_want', 'cur_why', 'cur_state', 'cur_day')
 
 
 def day_num():
@@ -1029,6 +1184,7 @@ def tick_rules(sync, q):
         trv_target('salon', PLAN['salon_night'])
         trv_target('bed', PLAN['bed_night'])
         state['night_on'] = True
+        curtains('close', 'noc')
 
     # --- rano, przed pobudką (tylko gdy telefon nadal leży = jestem w domu) ---
     if asleep and m < 720:
@@ -1046,6 +1202,7 @@ def tick_rules(sync, q):
                     ws // 60, ws % 60, wm // 60, wm % 60, ', budzik %d:%02d' % (am // 60, am % 60) if am is not None else ''))
                 state['wl'] = {'t0': time.time() - (m - ws) * 60}
                 state['wl_at'] = 0
+                curtains('open', 'budzenie')  # cicho, razem z rozjaśnianiem lampki
 
     # --- wstałem: telefon zdjęty rano ---
     if was and not asleep and ph and ph.get('e') == 'up':
@@ -1066,6 +1223,9 @@ def tick_rules(sync, q):
         trv_target('salon', PLAN['salon_day'])
         state['bed_off_at'] = time.time() + PLAN['bed_after_min'] * 60
         state['night_on'] = False
+        # zasłony: jeśli nie otworzyły się już przy budzeniu, otwieramy teraz (zwykła prędkość)
+        if not (state.get('cur_state') == 'open' and state.get('cur_day') == day_key()):
+            curtains('open', 'wstalem', quiet=False)
     if state.get('bed_off_at') and time.time() >= state['bed_off_at']:
         state['bed_off_at'] = None
         # w tygodniu do 18:00 sypialnia stoi pusta; w weekend jestem w domu
@@ -1273,6 +1433,7 @@ def run():
             pc_tick()
             gw_windows()
             win_tick()
+            curtains_tick()
             night_lamp_guard()
             wake_light_tick()
             if log_buf and (time.time() - last_report > 120 or len(log_buf) > 8):
