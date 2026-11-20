@@ -52,6 +52,7 @@ PLAN = {
     'scale_min': 45.0, 'scale_max': 150.0,
     'pc_plug': '192.168.100.40',  # gniazdko Shelly głośników Edifier: prąd tylko przy włączonym komputerze (Komputer ON → Muzyka Poranna OFF)
     'lamp_salon': '192.168.100.36',  # gniazdko Shelly „Lampa Salon”: włącza Google Home przy powrocie, płytka gasi na noc
+    'kitchen_led': '192.168.100.39',  # moduł Shelly 1PM Mini „LED pod szafkami” w kuchni: włącza Google Home, płytka gasi na noc
     # --- budzenie światłem: żarówka WiZ „Lampka Sypialnia” (lokalnie, UDP 38899) ---
     'wiz_bed': '192.168.100.37',
     'wake_light': True,
@@ -1173,6 +1174,8 @@ def tick_rules(sync, q):
         dev_set('bed_hum', 'on', False, 'sypialnia nawilzacz off')
         if PLAN.get('lamp_salon'):
             plug_set(PLAN['lamp_salon'], False, 'lampa salon off')
+        if PLAN.get('kitchen_led'):
+            plug_set(PLAN['kitchen_led'], False, 'kuchnia led off')
         if PLAN.get('wiz_bed'):
             state['wl'] = None
             log('lampka sypialnia off' if wiz({'state': False}) is not None else 'lampka sypialnia nie odpowiada (%s)' % state.get('wiz_err'))
