@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.63'
+VERSION = '1.0.64'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -70,8 +70,8 @@ PLAN = {
     'curtains': True,
     'cur_left': 'C5:C5:0C:F4:59:35',
     'cur_right': 'C8:58:63:F2:4C:79',
-    'cur_left_open': 75,    # % otwarcia lewej zasłony (100 = całkiem odsunięta, 0 = zasunięta)
-    'cur_right_open': 70,   # % otwarcia prawej
+    'cur_left_open': 82,    # % otwarcia lewej zasłony (100 = całkiem odsunięta, 0 = zasunięta)
+    'cur_right_open': 65,   # % otwarcia prawej
     'cur_quiet': 1,         # prędkość cicha (budzenie, zasuwanie na noc)
     'cur_fast': 255,        # prędkość zwykła (po wstaniu)
 }
