@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.66'
+VERSION = '1.0.67'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -55,6 +55,10 @@ PLAN = {
     'kitchen_led': '192.168.100.39',  # moduł Shelly 1PM Mini „LED pod szafkami” w kuchni: włącza Google Home, płytka gasi na noc
     # --- budzenie światłem: żarówka WiZ „Lampka Sypialnia” (lokalnie, UDP 38899) ---
     'wiz_bed': '192.168.100.37',
+    # --- klawisz jak zwykły włącznik: żarówka WiZ ma WiZclick z trybem 1 = „Wył.”, więc po podaniu prądu zostaje zgaszona
+    # (mignięcie prądu w nocy niczego nie zapala); poza nocą płytka zapala ją od razu po powrocie do sieci ---
+    'wiz_switch': True,
+    'wiz_lamps': ['192.168.100.37'],  # żarówki obsługiwane tak (kolejne dopisywać po dostawie)
     'wake_light': True,
     'wake_light_min': 30,   # tyle trwa rozjaśnianie (od ciemnego pomarańczu do jasnej bieli)
     'wake_light_wd': 420,   # zapas, gdy nie znamy pory zaśnięcia: w tygodniu start nie wcześniej niż 7:00 ...
@@ -232,9 +236,9 @@ def plug_set(ip, on, label):
     return False
 
 
-def wiz(params, method='setPilot'):
+def wiz(params, method='setPilot', ip=None):
     """Żarówka WiZ w sieci domowej: JSON po UDP na port 38899. Zwraca odpowiedź (dict) albo None."""
-    ip = PLAN.get('wiz_bed')
+    ip = ip or PLAN.get('wiz_bed')
     if not ip:
         return None
     import socket
@@ -366,9 +370,99 @@ def remote_cmd(sync):
         log('nieznane polecenie: %s' % c)
 
 
+WZ = {'sock': None, 'i': 0, 'on': {}, 'miss': {}, 'st': {}, 'pt': 0}
+
+
+def wiz_quick(ip):
+    """Jedno szybkie pytanie o stan żarówki (bez ponawiania, żeby nie blokować pętli). True/False = świeci/nie, None = brak odpowiedzi."""
+    import socket
+    s = None
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(0.3)
+        s.sendto(b'{"method":"getPilot","params":{}}', socket.getaddrinfo(ip, 38899)[0][-1])
+        r = json.loads(s.recv(1024))
+        return bool((r.get('result') or {}).get('state'))
+    except Exception:
+        return None
+    finally:
+        if s:
+            s.close()
+
+
+def wiz_power_on(ip, why):
+    """Żarówka dostała prąd (klawisz). W nocy, przy budzeniu i poza domem nic nie robimy: zostaje zgaszona."""
+    if state.get('asleep') or state.get('wl'):
+        log('klawisz: %s wrocila do sieci (%s), noc - zostaje zgaszona' % (ip[-3:], why))
+        return
+    aw = WZ.get('away')
+    if aw and aw.get('e') == 'out':
+        log('klawisz: %s wrocila do sieci (%s), mnie nie ma - zostaje zgaszona' % (ip[-3:], why))
+        return
+    ok = wiz({'state': True}, 'setPilot', ip) is not None
+    WZ['st'][ip] = True if ok else WZ['st'].get(ip)
+    log('klawisz: %s zapalona (%s)' % (ip[-3:], why) if ok else 'klawisz: %s nie odpowiada (%s)' % (ip[-3:], state.get('wiz_err')))
+
+
+def wiz_switch_tick(sync):
+    """Klawisz przy żarówce WiZ działa jak zwykły włącznik.
+    Sygnał 1: żarówka po starcie rozgłasza „firstBeat” na port 38900 (pewny znak, że dostała prąd).
+    Sygnał 2 (zapas): żarówka znikła z sieci i wróciła, a przed zniknięciem świeciła (zgaszona klawiszem)."""
+    lamps = PLAN.get('wiz_lamps') or []
+    if not PLAN.get('wiz_switch') or not lamps:
+        return
+    if sync is not None:
+        WZ['away'] = sync.get('away')
+    import socket
+    if WZ['sock'] is None:
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            except Exception:
+                pass
+            s.bind(('0.0.0.0', 38900))
+            s.setblocking(False)
+            WZ['sock'] = s
+        except Exception as e:
+            WZ['sock'] = False
+            log('klawisz: nasluch 38900 niedostepny (%s)' % e)
+    if WZ['sock']:
+        for _ in range(5):
+            try:
+                data, addr = WZ['sock'].recvfrom(1024)
+            except Exception:
+                break
+            ip = addr[0]
+            if ip in lamps and b'firstBeat' in data:
+                WZ['on'][ip] = True
+                WZ['miss'][ip] = 0
+                wiz_power_on(ip, 'firstBeat')
+    # zapas: co 1 s jedna żarówka po kolei (krótkie pytanie, pętla się nie blokuje)
+    if time.time() - WZ['pt'] < 1:
+        return
+    WZ['pt'] = time.time()
+    WZ['i'] = (WZ['i'] + 1) % len(lamps)
+    ip = lamps[WZ['i']]
+    st = wiz_quick(ip)
+    if st is None:
+        WZ['miss'][ip] = WZ['miss'].get(ip, 0) + 1
+        if WZ['miss'][ip] >= 3 and WZ['on'].get(ip):
+            WZ['on'][ip] = False  # brak prądu (klawisz wyłączony) albo chwilowo poza Wi-Fi
+        return
+    WZ['miss'][ip] = 0
+    was_on_before = WZ['st'].get(ip)
+    if WZ['on'].get(ip) is False:
+        WZ['on'][ip] = True
+        if not st and was_on_before:
+            wiz_power_on(ip, 'powrot do sieci')
+            return
+    WZ['on'][ip] = True
+    WZ['st'][ip] = st
+
+
 def night_lamp_guard():
-    # po zaniku prądu żarówka WiZ sama się zapala (tak ma zostać, bo bywa zwykłą lampką);
-    # w nocy przez 10 min po starcie płytki gasimy ją, gdy wróci do sieci włączona
+    # zapas dla żarówki bez WiZclick „Wył.”: w nocy przez 10 min po starcie płytki gasimy ją, gdy wróci do sieci włączona
     if not PLAN.get('wiz_bed') or not state.get('asleep') or state.get('wl'):
         return
     if time.time() - BOOT_T[0] > 600 or time.time() - state.get('nlg_at', 0) < 20:
@@ -1444,6 +1538,7 @@ def run():
             win_tick()
             curtains_tick()
             night_lamp_guard()
+            wiz_switch_tick(sync)
             wake_light_tick()
             if log_buf and (time.time() - last_report > 120 or len(log_buf) > 8):
                 last_report = time.time()
