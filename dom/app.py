@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.71'
+VERSION = '1.0.72'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -52,6 +52,7 @@ PLAN = {
     'scale_min': 45.0, 'scale_max': 150.0,
     'pc_plug': '192.168.100.40',  # gniazdko Shelly głośników Edifier: prąd tylko przy włączonym komputerze (Komputer ON → Muzyka Poranna OFF)
     'lamp_salon': '192.168.100.36',  # gniazdko Shelly „Lampa Salon”: włącza Google Home przy powrocie, płytka gasi na noc
+    'desk_light': '192.168.100.41',  # moduł Shelly 1PM Mini nad biurkiem (świeci, gdy chodzi komputer)
     'kitchen_led': '192.168.100.39',  # moduł Shelly 1PM Mini „LED pod szafkami” w kuchni: włącza Google Home, płytka gasi na noc
     # --- budzenie światłem: żarówka WiZ „Lampka Sypialnia” (lokalnie, UDP 38899) ---
     'wiz_bed': '192.168.100.37',
@@ -390,18 +391,31 @@ def wiz_quick(ip):
             s.close()
 
 
-def wiz_away():
-    """Nie ma mnie w domu: ostatnie zdarzenie ze Skrótu to wyjście (> 1,5 km), a od tej chwili nic nie wskazuje,
-    że wróciłem (komputer nie chodzi, telefon nie był odkładany ani zdejmowany z ładowarki).
-    Skrót „powrót” bywa zawodny, więc te znaki obecności unieważniają nieaktualne wyjście."""
+def light_on(ip):
+    """Czy gniazdko / moduł Shelly z lampą jest włączone (lokalne RPC). Brak odpowiedzi = nie."""
+    try:
+        gc.collect()
+        r = requests.get('http://%s/rpc/Switch.GetStatus?id=0' % ip, timeout=3)
+        try:
+            return bool(r.json().get('output'))
+        finally:
+            r.close()
+    except Exception:
+        return False
+
+
+def wiz_away(ip):
+    """Nie ma mnie w domu: ostatnie zdarzenie ze Skrótu to wyjście i nie pali się żadne inne światło.
+    (Gdy jestem w domu, zwykle coś świeci, więc to łapie też powrót, którego Skrót nie zapisał.)"""
     aw = WZ.get('away')
     if not aw or aw.get('e') != 'out':
         return False
-    if PC.get('on'):
-        return False
-    ph = WZ.get('phone')
-    if ph and str(ph.get('t', '')) > str(aw.get('t', '')):
-        return False
+    for other, st in WZ['st'].items():
+        if other != ip and st:
+            return False
+    for key in ('lamp_salon', 'kitchen_led', 'desk_light'):
+        if PLAN.get(key) and light_on(PLAN[key]):
+            return False
     return True
 
 
@@ -410,7 +424,7 @@ def wiz_power_on(ip, why):
     if state.get('asleep') or state.get('wl'):
         log('klawisz: %s wrocila do sieci (%s), noc - zostaje zgaszona' % (ip[-3:], why))
         return
-    if wiz_away():
+    if wiz_away(ip):
         log('klawisz: %s wrocila do sieci (%s), mnie nie ma - zostaje zgaszona' % (ip[-3:], why))
         return
     ok = wiz({'state': True}, 'setPilot', ip) is not None
@@ -427,7 +441,6 @@ def wiz_switch_tick(sync):
         return
     if sync is not None:
         WZ['away'] = sync.get('away')
-        WZ['phone'] = sync.get('phone')
     import socket
     if WZ['sock'] is None:
         try:
