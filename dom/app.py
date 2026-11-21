@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.69'
+VERSION = '1.0.70'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -391,13 +391,9 @@ def wiz_quick(ip):
 
 
 def wiz_power_on(ip, why):
-    """Żarówka dostała prąd (klawisz). W nocy, przy budzeniu i poza domem nic nie robimy: zostaje zgaszona."""
+    """Żarówka dostała prąd (klawisz). W nocy i przy budzeniu nic nie robimy: zostaje zgaszona."""
     if state.get('asleep') or state.get('wl'):
         log('klawisz: %s wrocila do sieci (%s), noc - zostaje zgaszona' % (ip[-3:], why))
-        return
-    aw = WZ.get('away')
-    if aw and aw.get('e') == 'out':
-        log('klawisz: %s wrocila do sieci (%s), mnie nie ma - zostaje zgaszona' % (ip[-3:], why))
         return
     ok = wiz({'state': True}, 'setPilot', ip) is not None
     WZ['st'][ip] = True if ok else WZ['st'].get(ip)
@@ -435,6 +431,9 @@ def wiz_switch_tick(sync):
                 break
             ip = addr[0]
             if ip in lamps and b'firstBeat' in data:
+                if time.time() - WZ.setdefault('fb', {}).get(ip, 0) < 30:
+                    continue  # żarówka rozgłasza firstBeat kilka razy pod rząd
+                WZ['fb'][ip] = time.time()
                 WZ['on'][ip] = True
                 WZ['miss'][ip] = 0
                 wiz_power_on(ip, 'firstBeat')
