@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.67'
+VERSION = '1.0.68'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -454,7 +454,7 @@ def wiz_switch_tick(sync):
     was_on_before = WZ['st'].get(ip)
     if WZ['on'].get(ip) is False:
         WZ['on'][ip] = True
-        if not st and was_on_before:
+        if not st and was_on_before is not False:  # świeciła albo nie znamy stanu (np. po restarcie płytki)
             wiz_power_on(ip, 'powrot do sieci')
             return
     WZ['on'][ip] = True
