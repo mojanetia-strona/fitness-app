@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.71'
+VERSION = '1.0.72'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -390,12 +390,22 @@ def wiz_quick(ip):
             s.close()
 
 
+def home_seen():
+    """Ktoś jest w domu (komputer włączony, okno otwarte, waga): ostatnie wyjście ze Skrótu przestaje się liczyć."""
+    aw = WZ.get('away')
+    if aw and aw.get('e') == 'out' and state.get('home_after') != aw.get('t'):
+        state['home_after'] = aw.get('t')
+        log('obecnosc: jestem w domu (wyjscie %s nieaktualne)' % aw.get('t'))
+
+
 def wiz_away():
     """Nie ma mnie w domu: ostatnie zdarzenie ze Skrótu to wyjście (> 1,5 km), a od tej chwili nic nie wskazuje,
-    że wróciłem (komputer nie chodzi, telefon nie był odkładany ani zdejmowany z ładowarki).
-    Skrót „powrót” bywa zawodny, więc te znaki obecności unieważniają nieaktualne wyjście."""
+    że wróciłem: komputer nie chodzi i nie był włączany, okno nie było otwierane, nikt nie stawał na wadze,
+    telefon nie był odkładany ani zdejmowany z ładowarki. Skrót „powrót” nie działa, więc liczą się te znaki."""
     aw = WZ.get('away')
     if not aw or aw.get('e') != 'out':
+        return False
+    if state.get('home_after') == aw.get('t'):
         return False
     if PC.get('on'):
         return False
@@ -703,6 +713,7 @@ def air_start(room):
         rec['on'][d] = bool(on)
     air_put(room, rec)
     log('okno otwarte: %s, wylaczam i skrecam grzejnik' % ROOM_NAME[room])
+    home_seen()
     AIR_SELF[0] = True
     for d in ROOM_DEV[room]:
         if rec['on'][d]:
@@ -1101,6 +1112,7 @@ def scale_tick():
     if scale['last_kg'] and abs(kg - scale['last_kg']) < 0.05 and time.time() - scale['last_sent'] < 600:
         return
     try:
+        home_seen()
         res = gas({'kg': '%.2f' % kg})
         if isinstance(res, dict) and res.get('pobudka_waga'):
             NOW[0] = True  # pobudka z wagi: od razu synchronizacja i reguły, bez czekania na kolejny cykl
@@ -1135,6 +1147,7 @@ def pc_tick():
     except Exception:
         return
     if PC['on'] is False and on:
+        home_seen()
         PC['evt'] = True
         NOW[0] = True
         log('komputer wlaczony')
@@ -1174,7 +1187,7 @@ def day_key():
     return '%04d%02d%02d' % (tm[0], tm[1], tm[2])
 
 
-SAVE_KEYS = ('asleep', 'bed_off_at', 'bed_eve', 'night_on', 'bed_pause', 'air', 'wl', 'sleep_at', 'robot_ev', 'robot_day', 'wiz_lvl',
+SAVE_KEYS = ('asleep', 'bed_off_at', 'bed_eve', 'night_on', 'bed_pause', 'air', 'wl', 'sleep_at', 'robot_ev', 'robot_day', 'wiz_lvl', 'home_after',
              'cur_want', 'cur_why', 'cur_state', 'cur_day')
 
 
