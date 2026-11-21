@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.70'
+VERSION = '1.0.71'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -390,10 +390,28 @@ def wiz_quick(ip):
             s.close()
 
 
+def wiz_away():
+    """Nie ma mnie w domu: ostatnie zdarzenie ze Skrótu to wyjście (> 1,5 km), a od tej chwili nic nie wskazuje,
+    że wróciłem (komputer nie chodzi, telefon nie był odkładany ani zdejmowany z ładowarki).
+    Skrót „powrót” bywa zawodny, więc te znaki obecności unieważniają nieaktualne wyjście."""
+    aw = WZ.get('away')
+    if not aw or aw.get('e') != 'out':
+        return False
+    if PC.get('on'):
+        return False
+    ph = WZ.get('phone')
+    if ph and str(ph.get('t', '')) > str(aw.get('t', '')):
+        return False
+    return True
+
+
 def wiz_power_on(ip, why):
-    """Żarówka dostała prąd (klawisz). W nocy i przy budzeniu nic nie robimy: zostaje zgaszona."""
+    """Żarówka dostała prąd (klawisz albo mignięcie prądu). W nocy, przy budzeniu i gdy mnie nie ma: zostaje zgaszona."""
     if state.get('asleep') or state.get('wl'):
         log('klawisz: %s wrocila do sieci (%s), noc - zostaje zgaszona' % (ip[-3:], why))
+        return
+    if wiz_away():
+        log('klawisz: %s wrocila do sieci (%s), mnie nie ma - zostaje zgaszona' % (ip[-3:], why))
         return
     ok = wiz({'state': True}, 'setPilot', ip) is not None
     WZ['st'][ip] = True if ok else WZ['st'].get(ip)
@@ -409,6 +427,7 @@ def wiz_switch_tick(sync):
         return
     if sync is not None:
         WZ['away'] = sync.get('away')
+        WZ['phone'] = sync.get('phone')
     import socket
     if WZ['sock'] is None:
         try:
