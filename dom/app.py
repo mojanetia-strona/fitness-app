@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.64'
+VERSION = '1.0.66'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -429,8 +429,10 @@ def trv_target(name, temp, force=False):
     try:
         trv_call(tid, 'TRV.SetTarget', {'id': 0, 'target_C': temp})
         state['trv_' + name] = temp
+        state.pop('trv_retry_' + name, None)
         log('grzejnik %s -> %s' % (name, temp))
     except Exception as e:
+        state['trv_retry_' + name] = temp  # ponowimy przy najbliższym sprawdzeniu głowic (co 30 min)
         log('grzejnik %s blad %s' % (name, e))
 
 
@@ -451,7 +453,11 @@ def trv_brief():
                 r.close()
             out.append('%s %.1f/%.1f %d%%' % (name, t['current_C'], t['target_C'], t['pos']))
             room = 's' if name == 'salon' else 'b'
-            if t['target_C'] <= 5.5 and not air(room):
+            want = state.get('trv_retry_' + name)
+            if want is not None and not air(room):
+                log('grzejnik %s: ponawiam %s (poprzednio blad)' % (name, want))
+                trv_target(name, want)
+            elif t['target_C'] <= 5.5 and not air(room):
                 log('grzejnik %s zostal na %.1f po wietrzeniu, przywracam' % (name, t['target_C']))
                 trv_target(name, trv_plan(room))
         except Exception as e:
