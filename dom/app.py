@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.68'
+VERSION = '1.0.69'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -407,7 +407,7 @@ def wiz_power_on(ip, why):
 def wiz_switch_tick(sync):
     """Klawisz przy żarówce WiZ działa jak zwykły włącznik.
     Sygnał 1: żarówka po starcie rozgłasza „firstBeat” na port 38900 (pewny znak, że dostała prąd).
-    Sygnał 2 (zapas): żarówka znikła z sieci i wróciła, a przed zniknięciem świeciła (zgaszona klawiszem)."""
+    Sygnał 2 (zapas): żarówka znikła z sieci na min. 3 s i wróciła zgaszona."""
     lamps = PLAN.get('wiz_lamps') or []
     if not PLAN.get('wiz_switch') or not lamps:
         return
@@ -451,10 +451,9 @@ def wiz_switch_tick(sync):
             WZ['on'][ip] = False  # brak prądu (klawisz wyłączony) albo chwilowo poza Wi-Fi
         return
     WZ['miss'][ip] = 0
-    was_on_before = WZ['st'].get(ip)
     if WZ['on'].get(ip) is False:
         WZ['on'][ip] = True
-        if not st and was_on_before is not False:  # świeciła albo nie znamy stanu (np. po restarcie płytki)
+        if not st:  # wróciła zgaszona = dostała prąd z klawisza (WiZclick „Wył.”); świecąca po utracie Wi-Fi nic nie zmienia
             wiz_power_on(ip, 'powrot do sieci')
             return
     WZ['on'][ip] = True
