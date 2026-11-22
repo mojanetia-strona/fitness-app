@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.79'
+VERSION = '1.0.80'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -74,7 +74,7 @@ PLAN = {
     'robot_to': 1260,       # najpóźniej start do 21:00
     'robot_every': 1,       # co ile dni (1 = codziennie, 2 = co drugi dzień)
     'robot_fresh': 45,      # zdarzenie „oddaliłem się” ważne tyle minut (np. wyjście o 6:50 uruchomi robota o 7:00)
-    'robot_dock': [3, 1],   # MIoT: bateria, start-charge (powrót na stację); do sprawdzenia w logu przy pierwszym powrocie
+    'robot_dock': [2, 3],   # MIoT xiaomi.vacuum.ov42gl: stop-and-gocharge (przerywa sprzątanie i wraca na stację)
     'robot_start': [2, 1],  # MIoT: usługa vacuum, akcja start-sweep (tryb taki, jak ustawiony w Xiaomi Home)
     # --- zasłony w sypialni: 2× SwitchBot Curtain 3 Rod (Bluetooth, bez huba) ---
     'curtains': True,
