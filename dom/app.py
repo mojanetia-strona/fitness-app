@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.80'
+VERSION = '1.0.81'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -35,7 +35,9 @@ PLAN = {
     'bed_morning': 25.0,    # sypialnia przed pobudką, w trybie boost aż do wstania
     'salon_morning': 25.0,  # salon przed pobudką, w trybie boost aż do wstania
     'wake_boost': True,     # przed pobudką głowice w trybie boost (zawór 100%), odnawiany co 20 min do wstania
-    'bed_pre_min': 60,      # ile minut przed pobudką grzać sypialnię (tak samo jak salon)
+    'bed_pre_min': 60,      # (zapas) od 1.0.81 start grzania liczony z tempa nagrzewania pokoju
+    'heat_rate': 2.0,       # startowe tempo nagrzewania (°C/h), potem płytka uczy się go sama każdego ranka
+    'pre_min': 30, 'pre_max': 150, 'pre_margin': 10,  # start grzania: min/max minut przed pobudką + zapas
     'bed_after_min': 0,     # (nieużywane od 1.0.76) sypialnia zmienia się od razu po wstaniu
     'salon_pre_min': 60,    # (nieużywane) nawilżacz i oczyszczacz włączają się dopiero po zdjęciu telefonu
     'salon_heat_pre_min': 60,  # ile minut przed pobudką grzać salon
@@ -590,6 +592,61 @@ def boost_off(name):
         log('grzejnik %s boost off' % name)
     except Exception as e:
         log('grzejnik %s boost off blad %s' % (name, e))
+
+
+TCUR = {}  # pokój -> (czas, temperatura) z ostatniego odczytu
+
+
+def room_temp(room, q_t):
+    # salon: Qingping (głowica stoi przy oknie), sypialnia: głowica; odczyt głowicy najwyżej co 5 min
+    if room == 's' and q_t is not None:
+        return q_t
+    name = ROOM_TRV[room]
+    c = TCUR.get(name)
+    if c and time.time() - c[0] < 300:
+        return c[1]
+    gw, tid = cfg.get('shelly_gw'), cfg.get('trv', {}).get(name)
+    if not gw or tid is None:
+        return None
+    try:
+        gc.collect()
+        r = requests.get('http://%s/rpc/BluTrv.GetRemoteStatus?id=%s' % (gw, tid), timeout=10)
+        try:
+            v = r.json()['status']['trv:0']['current_C']
+        finally:
+            r.close()
+        TCUR[name] = (time.time(), v)
+        return v
+    except Exception:
+        return c[1] if c else None
+
+
+def heat_lead(room, cur, target):
+    # ile minut przed pobudką zacząć, żeby na pobudkę było ciepło (tempo nagrzewania uczone co rano)
+    rate = state.get('rate_' + room) or PLAN['heat_rate']
+    if cur is None:
+        return PLAN['salon_heat_pre_min']
+    need = max(0.0, target - cur) / rate * 60 + PLAN['pre_margin']
+    return int(max(PLAN['pre_min'], min(PLAN['pre_max'], need)))
+
+
+def heat_learn(room, cur, done):
+    # zapamiętuje tempo nagrzewania: po dojściu do celu albo przy wstaniu
+    h = state.get('heat_' + room)
+    if not h or cur is None:
+        return
+    hours = (time.time() - h['t0']) / 3600.0
+    rise = cur - h['T0']
+    if not done and cur < h['tgt'] - 0.3:
+        return
+    state['heat_' + room] = None
+    if hours < 0.33 or rise < 0.5:
+        return
+    rate = max(0.5, min(6.0, rise / hours))
+    old = state.get('rate_' + room) or PLAN['heat_rate']
+    new = round(0.6 * old + 0.4 * rate, 2)
+    state['rate_' + room] = new
+    log('nagrzewanie %s: %.1f -> %.1f w %d min (%.1f C/h), tempo %.2f' % (ROOM_NAME[room], h['T0'], cur, hours * 60, rate, new))
 
 
 def boost_tick(asleep, m):
@@ -1271,7 +1328,8 @@ def day_key():
 
 
 SAVE_KEYS = ('asleep', 'bed_off_at', 'bed_eve', 'night_on', 'bed_pause', 'air', 'wl', 'sleep_at', 'robot_ev', 'robot_day', 'wiz_lvl',
-             'cur_want', 'cur_why', 'cur_state', 'cur_day', 'boost_day', 'away_ev', 'away')
+             'cur_want', 'cur_why', 'cur_state', 'cur_day', 'boost_day', 'away_ev', 'away',
+             'rate_s', 'rate_b', 'heat_s', 'heat_b')
 
 
 def day_num():
@@ -1453,18 +1511,29 @@ def tick_rules(sync, q):
         trv_target('salon', PLAN['salon_night'])
         trv_target('bed', PLAN['bed_night'])
         state['night_on'] = True
-        curtains('close', 'noc')
+        if state.get('cur_state') != 'close':
+            curtains('close', 'noc')
 
     # --- rano, przed pobudką (tylko gdy telefon nadal leży = jestem w domu) ---
     if asleep and m < 720:
         wm = wake_min(sync, weekend)
-        if m >= wm - PLAN['salon_heat_pre_min'] and once('salon_heat'):
-            log('przed pobudka: salon %s%s' % (PLAN['salon_morning'], ' boost' if PLAN['wake_boost'] else ''))
-            trv_target('salon', PLAN['salon_morning'])
-            state['boost_day'] = day_key()
-        if m >= wm - PLAN['bed_pre_min'] and once('bed_heat'):
-            trv_target('bed', PLAN['bed_morning'])
-            state['boost_day'] = day_key()
+        am = wake_alarm_min(sync)
+        we = min(wm, am) if am is not None else wm  # wczesny termin z kalendarza: ciepło na budzik
+        for room, name, key, ok in (('s', 'salon', 'salon_morning', 'salon_heat'), ('b', 'bed', 'bed_morning', 'bed_heat')):
+            if state.get('once_' + ok) == day_key() or m < we - PLAN['pre_max']:
+                continue
+            cur = room_temp(room, t)
+            lead = heat_lead(room, cur, PLAN[key])
+            if m >= we - lead and once(ok):
+                log('przed pobudka: %s %s boost, teraz %s, start %d min przed %d:%02d%s' % (
+                    ROOM_NAME[room], PLAN[key], None if cur is None else round(cur, 1), lead, we // 60, we % 60, ' (budzik)' if we != wm else ''))
+                trv_target(name, PLAN[key])
+                state['boost_day'] = day_key()
+                if cur is not None:
+                    state['heat_' + room] = {'t0': time.time(), 'T0': cur, 'tgt': PLAN[key]}
+        for room in ('s', 'b'):
+            if state.get('heat_' + room):
+                heat_learn(room, room_temp(room, t), False)
         # budzenie światłem: start nie wcześniej niż 8 h 15 min od odłożenia telefonu, wcześniej tylko pod budzik z kalendarza
         if PLAN['wake_light'] and PLAN.get('wiz_bed') and sync:
             ws = wake_light_start(sync, weekend)
@@ -1476,6 +1545,10 @@ def tick_rules(sync, q):
                 state['wl_at'] = 0
                 curtains('open', 'budzenie')  # cicho, razem z rozjaśnianiem lampki
 
+    if was and not asleep:
+        for room in ('s', 'b'):
+            if state.get('heat_' + room):
+                heat_learn(room, room_temp(room, t), True)
     boost_tick(asleep, m)
 
     # --- wstałem: telefon zdjęty rano ---
@@ -1515,6 +1588,10 @@ def tick_rules(sync, q):
         log('wieczor: jestem w domu, sypialnia %s i nawilzacz' % PLAN['bed_home'])
         trv_target('bed', PLAN['bed_home'])
         hum_on('bed_hum', 'b', None)
+
+    # --- 21:00: zasłony w sypialni zasuwane (wieczorem dziwnie siedzieć przy odsłoniętych) ---
+    if m >= PLAN['night_from'] and state.get('cur_state') != 'close' and once('cur_eve'):
+        curtains('close', 'wieczor 21:00')
 
     # --- godzinę po zachodzie słońca, jestem w domu: lampa salon i LED-y w kuchni (dawne „Światło Wieczór”) ---
     if not asleep and not state.get('away') and m >= sun_min(False) + 60 and once('eve_light'):
