@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.72'
+VERSION = '1.0.73'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -424,6 +424,8 @@ def wiz_power_on(ip, why):
     if state.get('asleep') or state.get('wl'):
         log('klawisz: %s wrocila do sieci (%s), noc - zostaje zgaszona' % (ip[-3:], why))
         return
+    if SNAP['boot_rc'] == 'zasilanie' and time.time() - BOOT_T[0] < 180:
+        return  # brak prądu w całym mieszkaniu, nie klawisz: stan przywraca restore_tick
     if wiz_away(ip):
         log('klawisz: %s wrocila do sieci (%s), mnie nie ma - zostaje zgaszona' % (ip[-3:], why))
         return
@@ -1486,6 +1488,9 @@ def setup():
     except Exception:
         rc = '?'
     log('start v%s (%s), urzadzenia: %s' % (VERSION, rc, ','.join(sorted(dev.keys()))))
+    SNAP['boot_rc'] = rc
+    if rc == 'zasilanie':
+        SNAP['restore_at'] = time.time() + 60  # urządzenia też dopiero wstają po braku prądu
     try:
         import os
         with open('lasterr.txt') as f:
@@ -1517,6 +1522,100 @@ def setup():
             log('oczyszczacz model %s' % state['pur_model'])
         except Exception as e:
             print('pur model err', e)
+
+
+# ---------- powrót prądu: przywracanie stanu urządzeń ----------
+# Co 2 min płytka zapisuje stan urządzeń zasilanych z gniazdka (snap.json). Gdy płytka wstaje po braku prądu
+# (nie po aktualizacji ani restarcie), po 60 s przywraca ten stan: co było włączone, włącza w tym samym trybie,
+# co było wyłączone, wyłącza. Głowice grzejników i robot mają baterie, więc ich to nie dotyczy.
+SNAP_DEV = {'salon_hum': ('on', 'sh_mode', 'sh_target'), 'salon_pur': ('on', 'sp_mode', 'sp_fan'), 'bed_hum': ('on', 'bh_mode')}
+SNAP = {'t': 0, 'boot_rc': None, 'restore_at': 0, 'js': None}
+
+
+def snap_tick():
+    if SNAP['restore_at'] or time.time() - SNAP['t'] < 120:
+        return  # czekamy na przywrócenie po braku prądu (nie zapisujemy stanu „wszystko wyłączone”)
+    SNAP['t'] = time.time()
+    try:
+        with open('snap.json') as f:
+            d = json.load(f)
+    except Exception:
+        d = {}
+    for name, keys in SNAP_DEV.items():
+        if not dev.get(name):
+            continue
+        v = dev_get(name, keys)
+        if None not in v:
+            d[name] = dict(zip(keys, v))
+    for key in ('lamp_salon', 'kitchen_led'):
+        ip = PLAN.get(key)
+        if not ip:
+            continue
+        try:
+            gc.collect()
+            r = requests.get('http://%s/rpc/Switch.GetStatus?id=0' % ip, timeout=3)
+            try:
+                d[key] = {'on': bool(r.json().get('output'))}
+            finally:
+                r.close()
+        except Exception:
+            pass
+    for ip in PLAN.get('wiz_lamps') or []:
+        r = wiz({}, 'getPilot', ip)
+        x = (r or {}).get('result')
+        if x:
+            d['wiz_' + ip] = {k: x[k] for k in ('state', 'dimming', 'temp', 'sceneId', 'r', 'g', 'b') if k in x}
+    js = json.dumps(d)
+    if js == SNAP['js']:
+        return
+    try:
+        with open('snap.json', 'w') as f:
+            f.write(js)
+        SNAP['js'] = js
+    except Exception as e:
+        print('snap save err', e)
+
+
+def restore_tick():
+    if not SNAP['restore_at'] or time.time() < SNAP['restore_at']:
+        return
+    SNAP['restore_at'] = 0
+    try:
+        with open('snap.json') as f:
+            d = json.load(f)
+    except Exception:
+        log('prad: brak zapisanego stanu urzadzen, nic nie przywracam')
+        return
+    done = []
+    for name, keys in SNAP_DEV.items():
+        st = d.get(name)
+        if not st or not dev.get(name):
+            continue
+        if st.get('on'):
+            dev_set(name, 'on', True)
+            time.sleep(2)
+            for k in keys[1:]:
+                if k == 'sp_fan' and st.get('sp_mode') != 6:
+                    continue  # bieg tylko w trybie ręcznym (inaczej przełączyłby oczyszczacz z auto)
+                if st.get(k) is not None:
+                    dev_set(name, k, st[k])
+            done.append('%s wl' % name)
+        else:
+            dev_set(name, 'on', False)
+            done.append('%s wyl' % name)
+    for key in ('lamp_salon', 'kitchen_led'):
+        st = d.get(key)
+        if st and PLAN.get(key):
+            plug_set(PLAN[key], bool(st.get('on')), 'prad: %s %s' % (key, 'wl' if st.get('on') else 'wyl'))
+    for ip in PLAN.get('wiz_lamps') or []:
+        st = d.get('wiz_' + ip)
+        if st and st.get('state'):
+            pr = {k: v for k, v in st.items() if k != 'state'}
+            pr['state'] = True
+            wiz(pr, 'setPilot', ip)
+            WZ['st'][ip] = True
+            done.append('%s wl' % ip[-3:])
+    log('prad wrocil, przywracam stan: %s' % (', '.join(done) or 'nic'))
 
 
 BOOT_T = [0]
@@ -1570,6 +1669,8 @@ def run():
             night_lamp_guard()
             wiz_switch_tick(sync)
             wake_light_tick()
+            restore_tick()
+            snap_tick()
             if log_buf and (time.time() - last_report > 120 or len(log_buf) > 8):
                 last_report = time.time()
                 flush_log()
