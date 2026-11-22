@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.78'
+VERSION = '1.0.79'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -74,6 +74,7 @@ PLAN = {
     'robot_to': 1260,       # najpóźniej start do 21:00
     'robot_every': 1,       # co ile dni (1 = codziennie, 2 = co drugi dzień)
     'robot_fresh': 45,      # zdarzenie „oddaliłem się” ważne tyle minut (np. wyjście o 6:50 uruchomi robota o 7:00)
+    'robot_dock': [3, 1],   # MIoT: bateria, start-charge (powrót na stację); do sprawdzenia w logu przy pierwszym powrocie
     'robot_start': [2, 1],  # MIoT: usługa vacuum, akcja start-sweep (tryb taki, jak ustawiony w Xiaomi Home)
     # --- zasłony w sypialni: 2× SwitchBot Curtain 3 Rod (Bluetooth, bez huba) ---
     'curtains': True,
@@ -804,9 +805,10 @@ def sun_min(rise):
     return int(utc + off) % 1440
 
 
-def is_dark(m=None):
+def is_evening(m=None):
+    # tryb wieczorowy: od godziny po zachodzie słońca (wtedy jest już naprawdę ciemno) do rana
     m = mins() if m is None else m
-    return m >= sun_min(False) or m < sun_min(True)
+    return m >= sun_min(False) + 60 or m < sun_min(True)
 
 
 def hum_on(name, room, why):
@@ -1278,7 +1280,7 @@ def day_num():
 
 
 def robot_tick(sync, m):
-    """Robot rusza raz na `robot_every` dni, gdy telefon zgłosi oddalenie od domu (> 1,5 km). Kończy sam, powrotu nie przerywamy."""
+    """Robot rusza raz na `robot_every` dni, gdy telefon zgłosi oddalenie od domu (> 1,5 km). Po powrocie wraca na stację."""
     aw = (sync or {}).get('away')
     if not PLAN['robot'] or not aw or aw.get('e') != 'out' or not dev.get('robot'):
         return
@@ -1403,16 +1405,24 @@ def tick_rules(sync, q):
             elif not asleep:
                 # dawne rutyny „Powrót do domu Pon-Pt”, „DOM Weekend ON” i „Światło Wieczór”, bez ich okienek godzinowych
                 bed_ok = weekend or m >= 1080  # Pon-Pt sypialnia dopiero od 18:00
-                log('powrot do domu: salon on%s%s' % (', sypialnia on' if bed_ok else '', ', swiatla' if is_dark(m) else ''))
+                log('powrot do domu: salon on%s%s' % (', sypialnia on' if bed_ok else '', ', swiatla' if is_evening(m) else ''))
                 hum_on('salon_hum', 's', None)
                 hum_on('salon_pur', 's', None)
                 if bed_ok:
                     hum_on('bed_hum', 'b', None)
                     state['bed_eve'] = day_key()
-                if is_dark(m):
+                if is_evening(m):  # wieczorem tylko klimatyczne światło: lampa za kanapą i LED-y pod szafkami
                     for key in ('lamp_salon', 'kitchen_led'):
                         if PLAN.get(key):
                             plug_set(PLAN[key], True, key + ' on')
+            if not state['away'] and dev.get('robot') and PLAN.get('robot_dock'):
+                # wracam: robot na stację, nawet jeśli nie skończył (dawne „Zadokuj Robota”)
+                try:
+                    s_, a_ = PLAN['robot_dock']
+                    dev['robot'].action(s_, a_)
+                    log('robot: wrocilem, na stacje')
+                except Exception as e:
+                    log('robot: blad dokowania %s' % e)
             for name, room in (('salon', 's'), ('bed', 'b')):
                 trv_target(name, trv_plan(room))
 
