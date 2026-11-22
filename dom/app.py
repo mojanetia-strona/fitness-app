@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.76'
+VERSION = '1.0.77'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -30,6 +30,7 @@ PLAN = {
     'salon_night': 18.0,    # salon w nocy (po odłożeniu telefonu)
     'bed_day': 17.0,        # sypialnia w dzień (tylko ochrona przed wychłodzeniem)
     'bed_night': 17.0,      # sypialnia w nocy (do spania chłodniej)
+    'away_temp': 17.0,      # oba pokoje po wyjściu z domu (od 1.0.77 robi to płytka, nie Google Home)
     'bed_home': 23.0,       # sypialnia, gdy w niej jestem (Pon-Pt od 18:00, weekend po wstaniu); od 22.11 23°C jak w Google Home
     'bed_morning': 25.0,    # sypialnia przed pobudką, w trybie boost aż do wstania
     'salon_morning': 25.0,  # salon przed pobudką, w trybie boost aż do wstania
@@ -787,6 +788,8 @@ def air_stop(room, why):
 
 def trv_plan(room):
     m, night = mins(), state.get('asleep')
+    if state.get('away'):
+        return PLAN['away_temp']
     if room == 's':
         return PLAN['salon_night'] if night else PLAN['salon_day']
     return PLAN['bed_night'] if night else (PLAN['bed_home'] if is_weekend() or m >= 1080 else PLAN['bed_day'])
@@ -1234,7 +1237,7 @@ def day_key():
 
 
 SAVE_KEYS = ('asleep', 'bed_off_at', 'bed_eve', 'night_on', 'bed_pause', 'air', 'wl', 'sleep_at', 'robot_ev', 'robot_day', 'wiz_lvl',
-             'cur_want', 'cur_why', 'cur_state', 'cur_day', 'boost_day')
+             'cur_want', 'cur_why', 'cur_state', 'cur_day', 'boost_day', 'away_ev', 'away')
 
 
 def day_num():
@@ -1346,6 +1349,22 @@ def tick_rules(sync, q):
             if not air('b') and trv_plan('b') == PLAN['bed_home']:
                 trv_target('bed', PLAN['bed_home'])
 
+    # --- wyjście / powrót (Skrót iOS, promień 1,5 km): temperatury robi tylko płytka ---
+    aw = (sync or {}).get('away') or {}
+    if aw.get('t') and aw.get('t') != state.get('away_ev'):
+        first = state.get('away_ev') is None
+        state['away_ev'] = aw['t']
+        state['away'] = aw.get('e') == 'out'
+        if not first:
+            for n in list(BOOST):
+                boost_off(n)
+            if state['away']:
+                log('wyjscie z domu: grzejniki %s' % PLAN['away_temp'])
+            else:
+                log('powrot do domu: grzejniki wg planu')
+            for name, room in (('salon', 's'), ('bed', 'b')):
+                trv_target(name, trv_plan(room))
+
     # --- robot: wyszedłem dalej niż 1,5 km od domu ---
     robot_tick(sync, m)
 
@@ -1427,8 +1446,8 @@ def tick_rules(sync, q):
         # w tygodniu do 18:00 sypialnia stoi pusta; w weekend jestem w domu
         trv_target('bed', PLAN['bed_home'] if is_weekend() else PLAN['bed_day'])
 
-    # --- Pon-Pt od 18:00: sypialnia 22°C, jeśli jestem w domu (Google Home trzyma wtedy salon włączony) ---
-    if not weekend and 1080 <= m < PLAN['night_from'] and not asleep and not state.get('bed_eve') == day_key():
+    # --- Pon-Pt od 18:00: sypialnia ciepło, jeśli jestem w domu ---
+    if not weekend and 1080 <= m < PLAN['night_from'] and not asleep and not state.get('away') and not state.get('bed_eve') == day_key():
         pur_on, = dev_get('salon_pur', ['on'])
         if pur_on:
             state['bed_eve'] = day_key()
