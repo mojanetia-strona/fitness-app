@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.77'
+VERSION = '1.0.78'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -786,6 +786,38 @@ def air_stop(room, why):
     trv_target(ROOM_TRV[room], t)
 
 
+def sun_min(rise):
+    """Wschód/zachód słońca w Łodzi (min od północy, czas lokalny), przybliżenie ±5 min."""
+    import math
+    tm = now_local()
+    n = tm[7] if len(tm) > 7 and tm[7] else 1
+    lat, lon = 51.76, 19.46
+    g = 2 * math.pi / 365 * (n - 1)
+    eqt = 229.18 * (0.000075 + 0.001868 * math.cos(g) - 0.032077 * math.sin(g) - 0.014615 * math.cos(2 * g) - 0.040849 * math.sin(2 * g))
+    dec = 0.006918 - 0.399912 * math.cos(g) + 0.070257 * math.sin(g) - 0.006758 * math.cos(2 * g) + 0.000907 * math.sin(2 * g)
+    la = math.radians(lat)
+    c = math.cos(math.radians(90.833)) / (math.cos(la) * math.cos(dec)) - math.tan(la) * math.tan(dec)
+    ha = math.degrees(math.acos(max(-1.0, min(1.0, c))))
+    utc = 720 - 4 * (lon + (ha if rise else -ha)) - eqt
+    lt = mk(tm[0], tm[1], tm[2], tm[3], tm[4])
+    off = int(round((lt - time.time()) / 1800.0)) * 30  # 60 zimą, 120 latem
+    return int(utc + off) % 1440
+
+
+def is_dark(m=None):
+    m = mins() if m is None else m
+    return m >= sun_min(False) or m < sun_min(True)
+
+
+def hum_on(name, room, why):
+    # włącza urządzenie, ale nie przy otwartym oknie w tym pokoju
+    if air(room):
+        return
+    on, = dev_get(name, ['on'])
+    if not on:
+        dev_set(name, 'on', True, why)
+
+
 def trv_plan(room):
     m, night = mins(), state.get('asleep')
     if state.get('away'):
@@ -1359,9 +1391,28 @@ def tick_rules(sync, q):
             for n in list(BOOST):
                 boost_off(n)
             if state['away']:
-                log('wyjscie z domu: grzejniki %s' % PLAN['away_temp'])
-            else:
-                log('powrot do domu: grzejniki wg planu')
+                # dawna rutyna Google Home „Wyjście → Wszystko OFF” (+ lampa salon i lampka sypialnia, których tam brakowało)
+                log('wyjscie z domu: wszystko off, grzejniki %s' % PLAN['away_temp'])
+                for d in ('bed_hum', 'salon_hum', 'salon_pur'):
+                    dev_set(d, 'on', False)
+                for key in ('lamp_salon', 'kitchen_led'):
+                    if PLAN.get(key):
+                        plug_set(PLAN[key], False, key + ' off')
+                if PLAN.get('wiz_bed'):
+                    wiz({'state': False})
+            elif not asleep:
+                # dawne rutyny „Powrót do domu Pon-Pt”, „DOM Weekend ON” i „Światło Wieczór”, bez ich okienek godzinowych
+                bed_ok = weekend or m >= 1080  # Pon-Pt sypialnia dopiero od 18:00
+                log('powrot do domu: salon on%s%s' % (', sypialnia on' if bed_ok else '', ', swiatla' if is_dark(m) else ''))
+                hum_on('salon_hum', 's', None)
+                hum_on('salon_pur', 's', None)
+                if bed_ok:
+                    hum_on('bed_hum', 'b', None)
+                    state['bed_eve'] = day_key()
+                if is_dark(m):
+                    for key in ('lamp_salon', 'kitchen_led'):
+                        if PLAN.get(key):
+                            plug_set(PLAN[key], True, key + ' on')
             for name, room in (('salon', 's'), ('bed', 'b')):
                 trv_target(name, trv_plan(room))
 
@@ -1433,6 +1484,8 @@ def tick_rules(sync, q):
             dev_set('salon_hum', 'sh_target', PLAN['rh_target'])
         dev_set('salon_pur', 'on', True)
         dev_set('salon_pur', 'sp_mode', 0, 'rano: salon oczyszczacz tryb dzienny')  # bieg ustawi reguła wg Qingpinga
+        if is_weekend():
+            hum_on('bed_hum', 'b', 'rano: sypialnia nawilzacz on (weekend)')  # dawne „DOM Weekend ON”
         trv_target('salon', PLAN['salon_day'])
         # sypialnia od razu po wstaniu: w tygodniu 17°C (stoi pusta do 18:00), w weekend 23°C
         state['bed_off_at'] = None
@@ -1448,11 +1501,17 @@ def tick_rules(sync, q):
 
     # --- Pon-Pt od 18:00: sypialnia ciepło, jeśli jestem w domu ---
     if not weekend and 1080 <= m < PLAN['night_from'] and not asleep and not state.get('away') and not state.get('bed_eve') == day_key():
-        pur_on, = dev_get('salon_pur', ['on'])
-        if pur_on:
-            state['bed_eve'] = day_key()
-            log('wieczor: jestem w domu, sypialnia %s' % PLAN['bed_home'])
-            trv_target('bed', PLAN['bed_home'])
+        state['bed_eve'] = day_key()
+        log('wieczor: jestem w domu, sypialnia %s i nawilzacz' % PLAN['bed_home'])
+        trv_target('bed', PLAN['bed_home'])
+        hum_on('bed_hum', 'b', None)
+
+    # --- godzinę po zachodzie słońca, jestem w domu: lampa salon i LED-y w kuchni (dawne „Światło Wieczór”) ---
+    if not asleep and not state.get('away') and m >= sun_min(False) + 60 and once('eve_light'):
+        log('wieczor: lampa salon i kuchnia led on')
+        for key in ('lamp_salon', 'kitchen_led'):
+            if PLAN.get(key):
+                plug_set(PLAN[key], True, key + ' on')
 
     # --- salon: moc nawilżacza według Qingpinga ---
     if rh is not None and not air('s') and not asleep:  # w nocy nie ruszamy trybu nocnego
