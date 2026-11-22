@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.75'
+VERSION = '1.0.76'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -35,7 +35,7 @@ PLAN = {
     'salon_morning': 25.0,  # salon przed pobudką, w trybie boost aż do wstania
     'wake_boost': True,     # przed pobudką głowice w trybie boost (zawór 100%), odnawiany co 20 min do wstania
     'bed_pre_min': 60,      # ile minut przed pobudką grzać sypialnię (tak samo jak salon)
-    'bed_after_min': 30,    # ile minut po zdjęciu telefonu wyłączyć sypialnię
+    'bed_after_min': 0,     # (nieużywane od 1.0.76) sypialnia zmienia się od razu po wstaniu
     'salon_pre_min': 60,    # (nieużywane) nawilżacz i oczyszczacz włączają się dopiero po zdjęciu telefonu
     'salon_heat_pre_min': 60,  # ile minut przed pobudką grzać salon
     'wake_wd': 420,         # domyślna pobudka w tygodniu (min od północy), gdy brak danych z telefonu
@@ -1415,7 +1415,9 @@ def tick_rules(sync, q):
         dev_set('salon_pur', 'on', True)
         dev_set('salon_pur', 'sp_mode', 0, 'rano: salon oczyszczacz tryb dzienny')  # bieg ustawi reguła wg Qingpinga
         trv_target('salon', PLAN['salon_day'])
-        state['bed_off_at'] = time.time() + PLAN['bed_after_min'] * 60
+        # sypialnia od razu po wstaniu: w tygodniu 17°C (stoi pusta do 18:00), w weekend 23°C
+        state['bed_off_at'] = None
+        trv_target('bed', PLAN['bed_home'] if is_weekend() else PLAN['bed_day'])
         state['night_on'] = False
         # zasłony: jeśli nie otworzyły się już przy budzeniu, otwieramy teraz (zwykła prędkość)
         if not (state.get('cur_state') == 'open' and state.get('cur_day') == day_key()):
