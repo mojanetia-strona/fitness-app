@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.74'
+VERSION = '1.0.75'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -31,11 +31,13 @@ PLAN = {
     'bed_day': 17.0,        # sypialnia w dzień (tylko ochrona przed wychłodzeniem)
     'bed_night': 17.0,      # sypialnia w nocy (do spania chłodniej)
     'bed_home': 23.0,       # sypialnia, gdy w niej jestem (Pon-Pt od 18:00, weekend po wstaniu); od 22.11 23°C jak w Google Home
-    'bed_morning': 23.0,    # sypialnia przed pobudką (cieplej na wstanie)
+    'bed_morning': 25.0,    # sypialnia przed pobudką, w trybie boost aż do wstania
+    'salon_morning': 25.0,  # salon przed pobudką, w trybie boost aż do wstania
+    'wake_boost': True,     # przed pobudką głowice w trybie boost (zawór 100%), odnawiany co 20 min do wstania
     'bed_pre_min': 60,      # ile minut przed pobudką grzać sypialnię (tak samo jak salon)
     'bed_after_min': 30,    # ile minut po zdjęciu telefonu wyłączyć sypialnię
     'salon_pre_min': 60,    # (nieużywane) nawilżacz i oczyszczacz włączają się dopiero po zdjęciu telefonu
-    'salon_heat_pre_min': 60,  # ile minut przed pobudką grzać salon na dzień
+    'salon_heat_pre_min': 60,  # ile minut przed pobudką grzać salon
     'wake_wd': 420,         # domyślna pobudka w tygodniu (min od północy), gdy brak danych z telefonu
     'wake_we': 540,         # domyślna pobudka w weekend
     'night_from': 1260,     # odłożenie telefonu po 21:00 = noc
@@ -553,6 +555,8 @@ def trv_target(name, temp, force=False):
         log('grzejnik %s: okno otwarte, %s po zamknieciu' % (name, temp))
         return
     try:
+        if BOOST.get(name) and temp < PLAN['bed_morning' if name == 'bed' else 'salon_morning']:
+            boost_off(name)
         trv_call(tid, 'TRV.SetTarget', {'id': 0, 'target_C': temp})
         state['trv_' + name] = temp
         state.pop('trv_retry_' + name, None)
@@ -560,6 +564,46 @@ def trv_target(name, temp, force=False):
     except Exception as e:
         state['trv_retry_' + name] = temp  # ponowimy przy najbliższym sprawdzeniu głowic (co 30 min)
         log('grzejnik %s blad %s' % (name, e))
+
+
+BOOST = {}  # głowica -> czas ostatniego włączenia boostu (tylko w RAM; po restarcie płytka odnawia go od razu)
+
+
+def boost_on(name):
+    tid = cfg.get('trv', {}).get(name)
+    try:
+        trv_call(tid, 'TRV.SetBoost', {'id': 0, 'duration': 1800})
+        if not BOOST.get(name):
+            log('grzejnik %s boost' % name)
+        BOOST[name] = time.time()
+    except Exception as e:
+        log('grzejnik %s boost blad %s' % (name, e))
+
+
+def boost_off(name):
+    tid = cfg.get('trv', {}).get(name)
+    BOOST.pop(name, None)
+    try:
+        trv_call(tid, 'TRV.ClearBoost', {'id': 0})
+        log('grzejnik %s boost off' % name)
+    except Exception as e:
+        log('grzejnik %s boost off blad %s' % (name, e))
+
+
+def boost_tick(asleep, m):
+    # boost trwa od startu grzania przed pobudką do wstania (telefon z ładowarki albo waga); odnawiany co 20 min
+    if not state.get('boost_day') == day_key() or not PLAN['wake_boost']:
+        return
+    if not asleep or m >= 720:
+        state['boost_day'] = None
+        for n in list(BOOST):
+            boost_off(n)
+        return
+    for name, room, key in (('salon', 's', 'salon_morning'), ('bed', 'b', 'bed_morning')):
+        if air(room) or state.get('trv_' + name) != PLAN[key]:
+            continue
+        if time.time() - BOOST.get(name, 0) > 1200:
+            boost_on(name)
 
 
 def trv_brief():
@@ -1190,7 +1234,7 @@ def day_key():
 
 
 SAVE_KEYS = ('asleep', 'bed_off_at', 'bed_eve', 'night_on', 'bed_pause', 'air', 'wl', 'sleep_at', 'robot_ev', 'robot_day', 'wiz_lvl',
-             'cur_want', 'cur_why', 'cur_state', 'cur_day')
+             'cur_want', 'cur_why', 'cur_state', 'cur_day', 'boost_day')
 
 
 def day_num():
@@ -1335,9 +1379,12 @@ def tick_rules(sync, q):
     if asleep and m < 720:
         wm = wake_min(sync, weekend)
         if m >= wm - PLAN['salon_heat_pre_min'] and once('salon_heat'):
-            trv_target('salon', PLAN['salon_day'])
+            log('przed pobudka: salon %s%s' % (PLAN['salon_morning'], ' boost' if PLAN['wake_boost'] else ''))
+            trv_target('salon', PLAN['salon_morning'])
+            state['boost_day'] = day_key()
         if m >= wm - PLAN['bed_pre_min'] and once('bed_heat'):
             trv_target('bed', PLAN['bed_morning'])
+            state['boost_day'] = day_key()
         # budzenie światłem: start nie wcześniej niż 8 h 15 min od odłożenia telefonu, wcześniej tylko pod budzik z kalendarza
         if PLAN['wake_light'] and PLAN.get('wiz_bed') and sync:
             ws = wake_light_start(sync, weekend)
@@ -1348,6 +1395,8 @@ def tick_rules(sync, q):
                 state['wl'] = {'t0': time.time() - (m - ws) * 60}
                 state['wl_at'] = 0
                 curtains('open', 'budzenie')  # cicho, razem z rozjaśnianiem lampki
+
+    boost_tick(asleep, m)
 
     # --- wstałem: telefon zdjęty rano ---
     if was and not asleep and ph and ph.get('e') == 'up':
