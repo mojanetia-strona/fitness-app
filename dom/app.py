@@ -22,16 +22,16 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.73'
+VERSION = '1.0.74'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
-    'salon_day': 22.0,      # salon w dzień
+    'salon_day': 23.0,      # salon w dzień (wg Qingpinga; od 22.11 23°C, bo zimno)
     'salon_night': 18.0,    # salon w nocy (po odłożeniu telefonu)
     'bed_day': 17.0,        # sypialnia w dzień (tylko ochrona przed wychłodzeniem)
     'bed_night': 17.0,      # sypialnia w nocy (do spania chłodniej)
-    'bed_home': 20.0,       # sypialnia, gdy w niej jestem (Pon-Pt od 18:00, weekend po wstaniu); głowica przy grzejniku, korekta -2
-    'bed_morning': 22.0,    # sypialnia przed pobudką (cieplej na wstanie)
+    'bed_home': 23.0,       # sypialnia, gdy w niej jestem (Pon-Pt od 18:00, weekend po wstaniu); od 22.11 23°C jak w Google Home
+    'bed_morning': 23.0,    # sypialnia przed pobudką (cieplej na wstanie)
     'bed_pre_min': 60,      # ile minut przed pobudką grzać sypialnię (tak samo jak salon)
     'bed_after_min': 30,    # ile minut po zdjęciu telefonu wyłączyć sypialnię
     'salon_pre_min': 60,    # (nieużywane) nawilżacz i oczyszczacz włączają się dopiero po zdjęciu telefonu
@@ -1292,6 +1292,16 @@ def tick_rules(sync, q):
         asleep = True  # zerknięcie na telefon w nocy to jeszcze nie pobudka
     state['asleep'] = asleep
 
+    # --- po starcie płytki: nowe temperatury dzienne od razu (tylko gdy jestem w domu i nie śpię) ---
+    if sync and not state.get('boot_temps'):
+        state['boot_temps'] = 1
+        aw = sync.get('away') or {}
+        if not asleep and aw.get('e') != 'out':
+            if not air('s'):
+                trv_target('salon', trv_plan('s'))
+            if not air('b') and trv_plan('b') == PLAN['bed_home']:
+                trv_target('bed', PLAN['bed_home'])
+
     # --- robot: wyszedłem dalej niż 1,5 km od domu ---
     robot_tick(sync, m)
 
@@ -1488,6 +1498,8 @@ def setup():
     except Exception:
         rc = '?'
     log('start v%s (%s), urzadzenia: %s' % (VERSION, rc, ','.join(sorted(dev.keys()))))
+    log('temperatury: salon dzien %s noc %s, sypialnia dom %s rano %s dzien %s noc %s' % (
+        PLAN['salon_day'], PLAN['salon_night'], PLAN['bed_home'], PLAN['bed_morning'], PLAN['bed_day'], PLAN['bed_night']))
     SNAP['boot_rc'] = rc
     if rc == 'zasilanie':
         SNAP['restore_at'] = time.time() + 60  # urządzenia też dopiero wstają po braku prądu
