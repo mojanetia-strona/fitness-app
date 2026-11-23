@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.94'
+VERSION = '1.0.95'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -616,6 +616,12 @@ def wiz_scan_tick():
             s.setblocking(False)
             WS['sock'] = s
             WS['learn'] = t + 3600
+            try:  # żarówki znane sprzed restartu: od razu wiadomo, która jest gdzie
+                with open('wiz.json') as f:
+                    for m, ip in json.load(f).items():
+                        WS['seen'][m] = {'ip': ip, 't': 0, 'p': {}}
+            except Exception:
+                pass
         except Exception as e:
             WS['sock'] = False
             log('zarowki: wyszukiwanie niedostepne (%s)' % e)
@@ -667,6 +673,13 @@ def wiz_scan_tick():
         WS['sw'] = 0 if a + 16 >= 255 else a + 16
     if t - BOOT_T[0] < 30:
         return
+    if t - WS.get('saved', 0) > 300 and WS['seen']:
+        WS['saved'] = t
+        try:
+            with open('wiz.json', 'w') as f:
+                json.dump({m: x['ip'] for m, x in WS['seen'].items()}, f)
+        except Exception as e:
+            print('wiz save', e)
     pres = ws_present()
     if not WS['inv']:
         WS['inv'] = True
@@ -735,6 +748,9 @@ def bath_tick():
             log('lazienka czujnik: brak sygnalu; czujniki BTHome w zasiegu: %s' % (', '.join(sorted(BTH_SEEN.keys())) or 'zaden'))
     ips = sorted(room_ips('bath'))
     if not ips:
+        if MOT['new']:
+            MOT['new'] = False
+            log('lazienka ruch, ale plytka nie zna jeszcze zarowek lazienki')
         return
     night = bool(state.get('asleep'))
     if MOT['new']:
@@ -1076,9 +1092,17 @@ def bthome(addr, p):
         j += 1 + n
     mac = ':'.join('%02X' % b for b in addr)
     if 0x21 in d and mac == PLAN.get('bath_motion'):
+        if MOT.get('ble') != d[0x21]:
+            MOT['ble'] = d[0x21]
+            MOT['blog'] = MOT.get('blog', 0) + 1  # licznik zmian z Bluetooth płytki (diagnostyka)
         if d[0x21]:
+            if not GW_MOT['val']:
+                MOT['new'] = True
             MOT['t'] = time.time()  # ruch w łazience (obsługa w pętli: bath_tick)
-            MOT['new'] = True
+            GW_MOT['val'] = True
+        elif GW_MOT['val']:
+            GW_MOT['val'] = False
+            MOT['t'] = time.time()
         return
     if 0x2D not in d:
         return
@@ -1322,7 +1346,7 @@ def gw_motion():
                     break
             log('bramka: czujnik ruchu lazienka %s' % ('id %s' % GW_MOT['id'] if GW_MOT['id'] is not None else 'nie znaleziony'))
         except Exception as e:
-            print('gw ruch map', e)
+            log('bramka: blad szukania czujnika ruchu (%s)' % e)
         return
     # nasłuch wiadomości od bramki (bez blokowania pętli)
     if GW_MOT['srv'] is None:
@@ -1375,7 +1399,7 @@ def gw_motion():
             r.close()
     except Exception as e:
         GW_MOT['fail'] = now + 120
-        print('gw ruch', e)
+        log('bramka: brak odpowiedzi o czujnik ruchu (%s)' % e)
         return
     if v != bool(GW_MOT['val']):
         mot_set(v, 'sprawdzenie')
