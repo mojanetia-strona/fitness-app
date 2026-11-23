@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.100'
+VERSION = '1.0.101'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -66,7 +66,7 @@ PLAN = {
     'wiz_switch': True,
     'wiz_lamps': ['192.168.100.37'],  # żarówki obsługiwane tak (kolejne dopisywać po dostawie)
     'bath_motion': '74:0B:12:94:53:38',  # Shelly BLU Motion ZB w łazience (czytany Bluetoothem płytki)
-    'bath_off_day': 300,    # łazienka gaśnie po tylu s bez ruchu (dzień)
+    'bath_off_day': 120,    # łazienka gaśnie po tylu s bez ruchu: dzień (rano 10 min, wieczór 5 min: bath_timeout)
     'bath_off_night': 120,  # ... w nocy
     'wake_light': True,
     'wake_light_min': 30,   # tyle trwa rozjaśnianie (od ciemnego pomarańczu do jasnej bieli)
@@ -760,6 +760,19 @@ def room_set(room, on, why=''):
         log('swiatla %s %s (%s, %d zarowek)' % (room, 'on' if on else 'off', why, len(ips)))
 
 
+def bath_timeout(night):
+    """Ile sekund bez ruchu, zanim łazienka zgaśnie (ustalone 23.11): rano 10 min, w dzień 2 min,
+    wieczorem (po zmierzchu) 5 min, w nocy 2 min. Liczone od ostatniego ruchu."""
+    if night:
+        return PLAN.get('bath_off_night', 120)
+    if morning_on():
+        return PLAN.get('bath_off_morning', 600)
+    m = mins()
+    if m >= sun_min(False) or m < 240:
+        return PLAN.get('bath_off_evening', 300)
+    return PLAN.get('bath_off_day', 120)
+
+
 def bath_tick():
     """Łazienka tylko na czujnik: ruch -> światło w trybie pory, cisza 5 min (w nocy 2 min) -> zgaszone.
     W nocy świeci jedna żarówka, ciemno i ciepło."""
@@ -815,7 +828,7 @@ def bath_tick():
             if night:
                 state['night_walks'] = (state.get('night_walks') or 0) + 1  # nocne wyjścia do łazienki (jakość snu)
                 log('lazienka w nocy (%d. raz tej nocy)' % state['night_walks'])
-    elif not GW_MOT['val'] and time.time() - MOT['t'] > PLAN['bath_off_night' if night else 'bath_off_day'] and time.time() - MOT.get('chk', 0) > 20:
+    elif not GW_MOT['val'] and time.time() - MOT.get('lt', MOT['t']) > bath_timeout(night) and time.time() - MOT.get('chk', 0) > 20:
         # brak ruchu: gasimy, także gdy światło zapaliło się inaczej (klawisz, aplikacja)
         MOT['chk'] = time.time()
         lit = [x['ip'] for mac, x in ws_present().items() if room_of(mac) == 'bath' and x['p'].get('state')]
@@ -1142,6 +1155,8 @@ def bthome(addr, p):
         if MOT.get('ble') != d[0x21]:
             MOT['ble'] = d[0x21]
             MOT['blog'] = MOT.get('blog', 0) + 1  # licznik zmian z Bluetooth płytki (diagnostyka)
+        if d[0x21] or GW_MOT['val']:
+            MOT['lt'] = time.time()
         if d[0x21]:
             if not GW_MOT['val']:
                 MOT['new'] = True
@@ -1363,6 +1378,8 @@ def mot_install():
 
 def mot_set(v, why):
     now = time.time()
+    if v or GW_MOT['val']:
+        MOT['lt'] = now  # ostatnia chwila z ruchem
     if v and not GW_MOT['val']:
         MOT['new'] = True
         MOT['src'] = why
