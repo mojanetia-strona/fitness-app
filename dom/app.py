@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.104'
+VERSION = '1.0.105'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -1947,6 +1947,8 @@ def tick_rules(sync, q):
     was = state.get('asleep')
     # bez odpowiedzi z arkusza nie zgadujemy: zostaje poprzedni stan (inaczej po restarcie noc/pobudka odpalałyby się drugi raz)
     asleep = phone_asleep(ph) if sync else bool(was)
+    if was and not asleep and not (240 <= m < 1080):
+        asleep = True  # bezpiecznik: poranek/pobudka tylko między 4:00 a 18:00, cokolwiek by się wydarzyło
     if was and not asleep and ph and ph.get('e') == 'up':
         # pobudka liczy się tylko od zdjęcia telefonu po 4:00 (albo z wagi); zdjęcie sprzed 4:00 nie odpali poranka później.
         # Zdjęcie w ciągu 10 min od startu płytki to skok prądu (ładowarka gaśnie razem z płytką), nie pobudka.
