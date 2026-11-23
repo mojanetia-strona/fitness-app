@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.95'
+VERSION = '1.0.96'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -753,8 +753,17 @@ def bath_tick():
             log('lazienka ruch, ale plytka nie zna jeszcze zarowek lazienki')
         return
     night = bool(state.get('asleep'))
+    if MOT.get('rs') and time.time() - MOT.get('rs_at', 0) >= 0.7:
+        # polecenie po UDP bywa gubione: powtarzamy je jeszcze 3 razy co ~1 s
+        MOT['rs'] -= 1
+        MOT['rs_at'] = time.time()
+        MOT['new'] = True
+        MOT['quiet'] = True
     if MOT['new']:
         MOT['new'] = False
+        if not MOT.pop('quiet', False):
+            MOT['rs'] = 3
+            MOT['rs_at'] = time.time()
         k, dim = light_target('bath')
         use = ips[:1] if night else ips
         for ip in use:
