@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.96'
+VERSION = '1.0.97'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -499,7 +499,10 @@ def wiz_switch_tick(sync):
                 WZ['on'][ip] = True
                 WZ['miss'][ip] = 0
                 wiz_power_on(ip, 'firstBeat')
-    # zapas: co 1 s jedna żarówka po kolei (krótkie pytanie, pętla się nie blokuje)
+    # zapas „zniknęła i wróciła zgaszona” wyłączony od 1.0.97: przy 28 żarówkach Wi-Fi gubi odpowiedzi
+    # i zapalał żarówki bez klawisza; wystarcza firstBeat
+    if not PLAN.get('wiz_backup', False):
+        return
     if time.time() - WZ['pt'] < 1:
         return
     WZ['pt'] = time.time()
@@ -597,7 +600,7 @@ def ws_send(ip, params, method='setPilot'):
         print('ws send err', e)
 
 
-def ws_present(age=30):
+def ws_present(age=45):
     t = time.time()
     return {mac: x for mac, x in WS['seen'].items() if t - x['t'] <= age}
 
@@ -615,7 +618,7 @@ def wiz_scan_tick():
             s.bind(('0.0.0.0', 0))
             s.setblocking(False)
             WS['sock'] = s
-            WS['learn'] = t + 3600
+            WS['learn'] = 0  # nauka klawiszy zrobiona 23.11 (polecenie wiz_learn włącza ją ponownie)
             try:  # żarówki znane sprzed restartu: od razu wiadomo, która jest gdzie
                 with open('wiz.json') as f:
                     for m, ip in json.load(f).items():
@@ -647,7 +650,7 @@ def wiz_scan_tick():
     # przy 27 odpowiedziach jednocześnie większość ginęła i obecność migała)
     ips = sorted(set(x['ip'] for x in WS['seen'].values()))
     if ips:
-        for _ in range(4):
+        for _ in range(2):
             WS['ui'] = (WS.get('ui', 0) + 1) % len(ips)
             try:
                 WS['sock'].sendto(msg, (ips[WS['ui']], 38899))
@@ -756,18 +759,22 @@ def bath_tick():
     if MOT.get('rs') and time.time() - MOT.get('rs_at', 0) >= 0.7:
         # polecenie po UDP bywa gubione: powtarzamy je jeszcze 3 razy co ~1 s
         MOT['rs'] -= 1
-        MOT['rs_at'] = time.time()
+        MOT['rs_at'] = time.time() + 2
         MOT['new'] = True
         MOT['quiet'] = True
     if MOT['new']:
         MOT['new'] = False
         if not MOT.pop('quiet', False):
-            MOT['rs'] = 3
+            MOT['rs'] = 1
             MOT['rs_at'] = time.time()
         k, dim = light_target('bath')
         use = ips[:1] if night else ips
-        for ip in use:
-            ws_send(ip, {'state': True, 'temp': k, 'dimming': dim})
+        bad = []
+        for ip in use:  # z potwierdzeniem od żarówki (do 3 prób), nie „wyślij i zapomnij”
+            if wiz({'state': True, 'temp': k, 'dimming': dim}, 'setPilot', ip) is None:
+                bad.append(ip.split('.')[-1])
+        if bad and not MOT.get('quiet_log'):
+            log('lazienka: brak potwierdzenia od .%s (%s)' % (',.'.join(bad), state.get('wiz_err')))
         if night:
             for ip in ips[1:]:
                 ws_send(ip, {'state': False})
