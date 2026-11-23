@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.101'
+VERSION = '1.0.102'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -67,7 +67,7 @@ PLAN = {
     'wiz_lamps': ['192.168.100.37'],  # żarówki obsługiwane tak (kolejne dopisywać po dostawie)
     'bath_motion': '74:0B:12:94:53:38',  # Shelly BLU Motion ZB w łazience (czytany Bluetoothem płytki)
     'bath_off_day': 120,    # łazienka gaśnie po tylu s bez ruchu: dzień (rano 10 min, wieczór 5 min: bath_timeout)
-    'bath_off_night': 120,  # ... w nocy
+    'bath_off_night': 60,   # ... w nocy
     'wake_light': True,
     'wake_light_min': 30,   # tyle trwa rozjaśnianie (od ciemnego pomarańczu do jasnej bieli)
     'wake_light_wd': 420,   # zapas, gdy nie znamy pory zaśnięcia: w tygodniu start nie wcześniej niż 7:00 ...
@@ -761,16 +761,9 @@ def room_set(room, on, why=''):
 
 
 def bath_timeout(night):
-    """Ile sekund bez ruchu, zanim łazienka zgaśnie (ustalone 23.11): rano 10 min, w dzień 2 min,
-    wieczorem (po zmierzchu) 5 min, w nocy 2 min. Liczone od ostatniego ruchu."""
-    if night:
-        return PLAN.get('bath_off_night', 120)
-    if morning_on():
-        return PLAN.get('bath_off_morning', 600)
-    m = mins()
-    if m >= sun_min(False) or m < 240:
-        return PLAN.get('bath_off_evening', 300)
-    return PLAN.get('bath_off_day', 120)
+    """Ile sekund bez ruchu, zanim łazienka zgaśnie (23.11, do testów): zawsze 2 min, w nocy 1 min.
+    Liczone od ostatniego ruchu. Gdyby gasło pod prysznicem: dłuższe czasy rano/wieczorem."""
+    return PLAN.get('bath_off_night', 60) if night else PLAN.get('bath_off_day', 120)
 
 
 def bath_tick():
