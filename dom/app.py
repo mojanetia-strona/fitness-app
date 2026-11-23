@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.98'
+VERSION = '1.0.99'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -644,6 +644,11 @@ def wiz_scan_tick():
         if not isinstance(x, dict) or not x.get('mac'):
             continue
         WS['seen'][x['mac']] = {'ip': addr[0], 't': t, 'p': {k: x[k] for k in ('state', 'temp', 'dimming', 'sceneId') if k in x}}
+        st = WS.setdefault('st', {}).setdefault(addr[0], [0, 0, 0, 0])  # zapytania, odpowiedzi, suma rssi, liczba rssi
+        st[1] += 1
+        if x.get('rssi'):
+            st[2] += x['rssi']
+            st[3] += 1
         WS['bc_ok'] = True
     msg = b'{"method":"getPilot","params":{}}'
     # znane żarówki: po 4 na raz, bezpośrednio (płytka mieści w buforze tylko kilka odpowiedzi naraz,
@@ -652,6 +657,7 @@ def wiz_scan_tick():
     if ips:
         for _ in range(2):
             WS['ui'] = (WS.get('ui', 0) + 1) % len(ips)
+            WS.setdefault('st', {}).setdefault(ips[WS['ui']], [0, 0, 0, 0])[0] += 1
             try:
                 WS['sock'].sendto(msg, (ips[WS['ui']], 38899))
             except Exception:
@@ -683,6 +689,17 @@ def wiz_scan_tick():
                 json.dump({m: x['ip'] for m, x in WS['seen'].items()}, f)
         except Exception as e:
             print('wiz save', e)
+    # raz na godzinę: jakość Wi-Fi każdej żarówki (siła sygnału i ile odpowiedzi doszło)
+    if t - WS.get('rep', t - 3000) >= 3600 and WS.get('st'):
+        WS['rep'] = t
+        names = {'bed': 'syp', 'bath': 'laz', 'work': 'sal/kuch'}
+        out = []
+        for mac, x in sorted(WS['seen'].items(), key=lambda a: (room_of(a[0]) or 'z', a[1]['ip'])):
+            q, r, rs, rn = WS['st'].get(x['ip'], [0, 0, 0, 0])
+            if q:
+                out.append('%s %s %s%% %s' % (names.get(room_of(mac), '?'), mac[-4:], min(100, r * 100 // q), ('%ddBm' % (rs // rn)) if rn else '?'))
+        WS['st'] = {}
+        log('wifi zarowek (odpowiedzi, sygnal): ' + ' | '.join(out))
     pres = ws_present()
     if not WS['inv']:
         WS['inv'] = True
