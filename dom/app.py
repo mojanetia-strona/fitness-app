@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.87'
+VERSION = '1.0.88'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -573,6 +573,8 @@ def light_target(room='work', m=None):
         return 2700, 50
     if morning_on():
         return 3000, 65            # rano: ciepłe, nie dzienne
+    if dark and state.get('eve_ret') == day_key():
+        return PLAN.get('eve_k', 2700), PLAN.get('eve_dim', 40)  # wieczór po powrocie: klimatycznie, delikatnie
     if dark:
         k = 5000 - 2000 * min(1.0, ((m - ss) % 1440) / 120.0)  # od zmierzchu przez 2 h do 3000 K
         return int(k) // 100 * 100, 100
@@ -1584,7 +1586,7 @@ def day_key():
     return '%04d%02d%02d' % (tm[0], tm[1], tm[2])
 
 
-SAVE_KEYS = ('morn', 'night_walks', 'asleep', 'bed_off_at', 'bed_eve', 'night_on', 'bed_pause', 'air', 'wl', 'sleep_at', 'robot_ev', 'robot_day', 'wiz_lvl',
+SAVE_KEYS = ('eve_ret', 'morn', 'night_walks', 'asleep', 'bed_off_at', 'bed_eve', 'night_on', 'bed_pause', 'air', 'wl', 'sleep_at', 'robot_ev', 'robot_day', 'wiz_lvl',
              'cur_want', 'cur_why', 'cur_state', 'cur_day', 'boost_day', 'away_ev', 'away',
              'rate_s', 'rate_b', 'heat_s', 'heat_b')
 
@@ -1730,7 +1732,9 @@ def tick_rules(sync, q):
                 if bed_ok:
                     hum_on('bed_hum', 'b', None)
                     state['bed_eve'] = day_key()
-                if eve:  # wieczorem tylko lampa za kanapą (LED-y w kuchni wieczorem za mocne: off)
+                if eve:  # wieczorem: lampa za kanapą + salon i kuchnia klimatycznie (LED-y w kuchni za mocne: off)
+                    state['eve_ret'] = day_key()
+                    room_set('work', True, 'powrot wieczorem, klimatycznie')
                     if PLAN.get('lamp_salon'):
                         plug_set(PLAN['lamp_salon'], True, 'lamp_salon on')
                     if PLAN.get('kitchen_led'):
