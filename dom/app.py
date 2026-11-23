@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.102'
+VERSION = '1.0.103'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -574,7 +574,7 @@ def light_target(room='work', m=None):
             return 2700, 15        # noc: jedna żarówka, ciemno i ciepło
         if morning_on():
             return 6000, 100       # rano: białe, jasne, rozbudza
-        return (3500, 90) if dark else (5000, 100)
+        return (2700, 45) if dark else (5000, 100)  # po zmierzchu ciepło i przygaszone, relaksująco
     if room == 'bed':
         return 2700, (60 if dark else 100)  # zawsze ciepło, po zmierzchu przygaszone
     # salon + kuchnia
@@ -1954,7 +1954,9 @@ def tick_rules(sync, q):
             _, _, _, eh, emi = parse_iso(ph['t'])
             ago = local_minutes_since(ph['t'])
             blip = abs((time.time() - ago * 60) - BOOT_T[0]) < 600
-            if eh * 60 + emi < 240 or blip:
+            # zdjęcie telefonu wieczorem (od 18:00) po odłożeniu na noc to zerknięcie, nie poranek (23.11: o 21:20
+            # odpalał się tryb poranny: białe światło, zasłony otwarte)
+            if eh * 60 + emi < 240 or eh * 60 + emi >= 1080 or blip:
                 asleep = True
                 if blip and not state.get('blip_log'):
                     state['blip_log'] = 1
