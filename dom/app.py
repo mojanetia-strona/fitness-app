@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.86'
+VERSION = '1.0.87'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -1533,16 +1533,15 @@ def pc_tick():
     except Exception:
         return
     if PC['on'] and on is False:
-        # komputer wyłączony: LED-y w kuchni off (wieczorem po zmierzchu zostają jako światło klimatyczne)
-        m = mins()
-        if PLAN.get('kitchen_led') and not (m >= sun_min(False) or m < 240):
+        if PLAN.get('kitchen_led'):  # komputer wyłączony: LED-y w kuchni off
             plug_set(PLAN['kitchen_led'], False, 'komputer wylaczony: kuchnia led off')
     if PC['on'] is False and on:
         PC['evt'] = True
         NOW[0] = True
         log('komputer wlaczony')
-        if PLAN.get('kitchen_led') and not state.get('asleep'):
-            plug_set(PLAN['kitchen_led'], True, 'komputer wlaczony: kuchnia led on')
+        m = mins()
+        if PLAN.get('kitchen_led') and not state.get('asleep') and 240 <= m < sun_min(False):
+            plug_set(PLAN['kitchen_led'], True, 'komputer wlaczony: kuchnia led on')  # tylko w dzień (do zmierzchu)
         mo = state.get('morn')
         if mo and not mo.get('we') and not mo.get('pc'):
             mo = dict(mo)
@@ -1731,10 +1730,11 @@ def tick_rules(sync, q):
                 if bed_ok:
                     hum_on('bed_hum', 'b', None)
                     state['bed_eve'] = day_key()
-                if eve:  # wieczorem tylko klimatyczne światło: lampa za kanapą i LED-y pod szafkami
-                    for key in ('lamp_salon', 'kitchen_led'):
-                        if PLAN.get(key):
-                            plug_set(PLAN[key], True, key + ' on')
+                if eve:  # wieczorem tylko lampa za kanapą (LED-y w kuchni wieczorem za mocne: off)
+                    if PLAN.get('lamp_salon'):
+                        plug_set(PLAN['lamp_salon'], True, 'lamp_salon on')
+                    if PLAN.get('kitchen_led'):
+                        plug_set(PLAN['kitchen_led'], False, 'kitchen_led off (wieczor)')
                 else:
                     room_set('work', True, 'powrot w dzien')  # cały salon i kuchnia
             if not state['away'] and dev.get('robot') and PLAN.get('robot_dock'):
