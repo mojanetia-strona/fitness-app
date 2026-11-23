@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.105'
+VERSION = '1.0.106'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -653,6 +653,13 @@ def wiz_scan_tick():
             if p_.get('sceneId') or abs((p_.get('temp') or 0) - k) >= 100 or abs((p_.get('dimming') or 0) - dim) >= 5:
                 WS['fix'][addr[0]] = t
                 ws_send(addr[0], {'temp': k, 'dimming': dim})
+        w = WS.get('want', {}).get(addr[0])
+        if w:
+            if t > w['until'] or bool(x.get('state')) == w['p']['state']:
+                WS['want'].pop(addr[0], None)  # potwierdzone (albo minął czas)
+            elif t - w['at'] > 1.5:
+                w['at'] = t
+                ws_send(addr[0], w['p'])  # żarówka nie wykonała polecenia: ponawiamy
         st = WS.setdefault('st', {}).setdefault(addr[0], [0, 0, 0, 0])  # zapytania, odpowiedzi, suma rssi, liczba rssi
         st[1] += 1
         if x.get('rssi'):
@@ -662,6 +669,14 @@ def wiz_scan_tick():
     msg = b'{"method":"getPilot","params":{}}'
     # znane żarówki: po 4 na raz, bezpośrednio (płytka mieści w buforze tylko kilka odpowiedzi naraz,
     # przy 27 odpowiedziach jednocześnie większość ginęła i obecność migała)
+    for ip in list(WS.get('want', {}).keys()):  # żarówki z niepotwierdzonym poleceniem: pytamy co sekundę
+        if t > WS['want'][ip]['until']:
+            WS['want'].pop(ip, None)
+            continue
+        try:
+            WS['sock'].sendto(msg, (ip, 38899))
+        except Exception:
+            pass
     ips = sorted(set(x['ip'] for x in WS['seen'].values()))
     if ips:
         for _ in range(2):
@@ -699,7 +714,9 @@ def wiz_scan_tick():
         except Exception as e:
             print('wiz save', e)
     # raz na godzinę: jakość Wi-Fi każdej żarówki (siła sygnału i ile odpowiedzi doszło)
-    if t - WS.get('rep', t - 3000) >= 3600 and WS.get('st'):
+    if 'rep' not in WS:
+        WS['rep'] = t - 3000  # pierwszy raport ok. 10 min po starcie
+    if t - WS['rep'] >= 3600 and WS.get('st'):
         WS['rep'] = t
         names = {'bed': 'syp', 'bath': 'laz', 'work': 'sal/kuch'}
         out = []
@@ -749,13 +766,16 @@ def room_set(room, on, why=''):
     ips = room_ips(room)
     if not ips:
         return
+    want = WS.setdefault('want', {})
     if on:
         k, dim = light_target(room)
-        for ip in ips:
-            ws_send(ip, {'state': True, 'temp': k, 'dimming': dim})
+        pr = {'state': True, 'temp': k, 'dimming': dim}
     else:
-        for ip in ips:
-            ws_send(ip, {'state': False})
+        pr = {'state': False}
+    for ip in ips:
+        # zapamiętany cel na 90 s: dopóki żarówka nie potwierdzi stanu, płytka ponawia polecenie
+        want[ip] = {'p': pr, 'until': time.time() + 90, 'at': time.time()}
+        ws_send(ip, pr)
     if why:
         log('swiatla %s %s (%s, %d zarowek)' % (room, 'on' if on else 'off', why, len(ips)))
 
