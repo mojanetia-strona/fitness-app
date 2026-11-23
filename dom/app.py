@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.99'
+VERSION = '1.0.100'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -644,6 +644,15 @@ def wiz_scan_tick():
         if not isinstance(x, dict) or not x.get('mac'):
             continue
         WS['seen'][x['mac']] = {'ip': addr[0], 't': t, 'p': {k: x[k] for k in ('state', 'temp', 'dimming', 'sceneId') if k in x}}
+        # barwa wg pomieszczenia: poprawiamy tylko świeżo potwierdzoną świecącą żarówkę (sama odpowiedź sprzed ms).
+        # Wcześniej płytka wysyłała barwę na podstawie starego stanu i ponownie zapalała żarówki zgaszone w aplikacji.
+        p_ = WS['seen'][x['mac']]['p']
+        if PLAN.get('lt_auto', True) and x.get('state') and not state.get('wl') and x['mac'][-4:].lower() != BED_LAMP \
+                and addr[0] != PLAN.get('wiz_bed') and t - WS.setdefault('fix', {}).get(addr[0], 0) > 20:
+            k, dim = light_target(room_of(x['mac']) or 'work')
+            if p_.get('sceneId') or abs((p_.get('temp') or 0) - k) >= 100 or abs((p_.get('dimming') or 0) - dim) >= 5:
+                WS['fix'][addr[0]] = t
+                ws_send(addr[0], {'temp': k, 'dimming': dim})
         st = WS.setdefault('st', {}).setdefault(addr[0], [0, 0, 0, 0])  # zapytania, odpowiedzi, suma rssi, liczba rssi
         st[1] += 1
         if x.get('rssi'):
@@ -717,7 +726,7 @@ def wiz_scan_tick():
             log('zarowki: %s%s| w sieci %d' % ('zniknely %s ' % fmt(gone) if gone else '', 'wrocily %s ' % fmt(back) if back else '', len(keys)))
     WS['pres'] = keys
     # barwa wg pory dnia: tylko świecące żarówki (poza lampką za łóżkiem, która ma własne budzenie)
-    if PLAN.get('lt_auto', True) and t - WS['col'] >= 30 and not state.get('wl'):
+    if False:  # od 1.0.100 barwa poprawiana przy odpowiedzi żarówki (wyżej)
         WS['col'] = t
         tg = {}
         for mac, x in pres.items():
