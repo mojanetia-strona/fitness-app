@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.97'
+VERSION = '1.0.98'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -767,14 +767,19 @@ def bath_tick():
         if not MOT.pop('quiet', False):
             MOT['rs'] = 1
             MOT['rs_at'] = time.time()
+            MOT['rs_log'] = False
         k, dim = light_target('bath')
         use = ips[:1] if night else ips
         bad = []
         for ip in use:  # z potwierdzeniem od żarówki (do 3 prób), nie „wyślij i zapomnij”
             if wiz({'state': True, 'temp': k, 'dimming': dim}, 'setPilot', ip) is None:
                 bad.append(ip.split('.')[-1])
-        if bad and not MOT.get('quiet_log'):
-            log('lazienka: brak potwierdzenia od .%s (%s)' % (',.'.join(bad), state.get('wiz_err')))
+        if not MOT.get('rs_log'):
+            MOT['rs_log'] = True
+            tm = now_local()
+            log('lazienka TEST %02d:%02d:%02d: ruch z %s, zarowki %s, %s' % (
+                tm[3], tm[4], tm[5], MOT.get('src', '?'), ' '.join('.' + i.split('.')[-1] for i in use),
+                'wszystkie potwierdzily' if not bad else 'NIE potwierdzily: .' + ',.'.join(bad)))
         if night:
             for ip in ips[1:]:
                 ws_send(ip, {'state': False})
@@ -1114,6 +1119,7 @@ def bthome(addr, p):
         if d[0x21]:
             if not GW_MOT['val']:
                 MOT['new'] = True
+                MOT['src'] = 'bluetooth plytki'
             MOT['t'] = time.time()  # ruch w łazience (obsługa w pętli: bath_tick)
             GW_MOT['val'] = True
         elif GW_MOT['val']:
@@ -1333,6 +1339,7 @@ def mot_set(v, why):
     now = time.time()
     if v and not GW_MOT['val']:
         MOT['new'] = True
+        MOT['src'] = why
     MOT['t'] = now  # ruch: od teraz; brak ruchu: od teraz liczy się czas do zgaszenia
     GW_MOT['val'] = v
 
