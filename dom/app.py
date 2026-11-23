@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.103'
+VERSION = '1.0.104'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -556,7 +556,7 @@ def room_ips(room):
 def morning_on():
     """Tryb poranny: od wstania; w tygodniu do włączenia komputera (najdłużej 3 h), w weekend 1 h."""
     mo = state.get('morn')
-    if not mo:
+    if not mo or mins() >= 1080 or mins() < 240:  # wieczorem i w nocy nigdy tryb poranny
         return False
     age = time.time() - mo['t0']
     if mo.get('we'):
