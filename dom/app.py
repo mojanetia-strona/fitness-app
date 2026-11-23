@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.81'
+VERSION = '1.0.82'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -334,6 +334,10 @@ def remote_cmd(sync):
         curtains('open' if c == 'cur_open' else 'close', 'test')
     elif c == 'cur_info':
         state['cur_chk'] = 0
+    elif c == 'wiz_learn':
+        WS['learn'] = time.time() + 3600
+        WS['inv'] = False
+        log('zarowki: nauka klawiszy przez 60 min')
     elif c == 'wiz_probe2':
         # te same ustawienia, różne formy wiadomości (nowsze żarówki WiZ bywają wybredne)
         import socket
@@ -435,7 +439,10 @@ def wiz_power_on(ip, why):
     if wiz_away(ip):
         log('klawisz: %s wrocila do sieci (%s), mnie nie ma - zostaje zgaszona' % (ip[-3:], why))
         return
-    ok = wiz({'state': True}, 'setPilot', ip) is not None
+    pr = {'state': True}
+    if ip != PLAN.get('wiz_bed') and PLAN.get('lt_auto', True):
+        pr['temp'], pr['dimming'] = light_target()  # od razu barwa wg pory dnia
+    ok = wiz(pr, 'setPilot', ip) is not None
     WZ['st'][ip] = True if ok else WZ['st'].get(ip)
     log('klawisz: %s zapalona (%s)' % (ip[-3:], why) if ok else 'klawisz: %s nie odpowiada (%s)' % (ip[-3:], state.get('wiz_err')))
 
@@ -444,7 +451,10 @@ def wiz_switch_tick(sync):
     """Klawisz przy żarówce WiZ działa jak zwykły włącznik.
     Sygnał 1: żarówka po starcie rozgłasza „firstBeat” na port 38900 (pewny znak, że dostała prąd).
     Sygnał 2 (zapas): żarówka znikła z sieci na min. 3 s i wróciła zgaszona."""
-    lamps = PLAN.get('wiz_lamps') or []
+    lamps = list(PLAN.get('wiz_lamps') or [])
+    for x in ws_present(60).values():  # żarówki znalezione w sieci też działają jak zwykły włącznik
+        if x['ip'] not in lamps:
+            lamps.append(x['ip'])
     if not PLAN.get('wiz_switch') or not lamps:
         return
     if sync is not None:
@@ -470,7 +480,7 @@ def wiz_switch_tick(sync):
             except Exception:
                 break
             ip = addr[0]
-            if ip in lamps and b'firstBeat' in data:
+            if b'firstBeat' in data:  # rozgłasza to tylko żarówka WiZ, która właśnie dostała prąd
                 if time.time() - WZ.setdefault('fb', {}).get(ip, 0) < 30:
                     continue  # żarówka rozgłasza firstBeat kilka razy pod rząd
                 WZ['fb'][ip] = time.time()
@@ -497,6 +507,127 @@ def wiz_switch_tick(sync):
             return
     WZ['on'][ip] = True
     WZ['st'][ip] = st
+
+
+# ---------- wszystkie żarówki WiZ: wyszukiwanie w sieci i barwa wg pory dnia ----------
+# Co 4 s płytka pyta całą sieć (broadcast getPilot na port 38899). Każda żarówka odpowiada swoim MAC, IP i stanem,
+# więc nie trzeba stałych IP w routerze. Przez 60 min po starcie (albo po poleceniu wiz_learn) każda zmiana
+# (żarówka znikła = klawisz wyłączony, wróciła = włączony) trafia do logu: tak przypisujemy żarówki do klawiszy.
+WS = {'sock': None, 'seen': {}, 'scan': 0, 'bc': 0, 'bc_ok': False, 'learn': 0, 'pres': None, 'inv': False, 'col': 0}
+
+
+def light_target(m=None):
+    """Barwa i jasność wg pory dnia: dzień 5000 K, od 16:00 coraz cieplej do 3000 K o 21:00, noc 2700 K przygaszone."""
+    m = mins() if m is None else m
+    d0, d1 = PLAN.get('lt_warm_from', 960), PLAN.get('lt_warm_to', 1260)
+    day_k, eve_k = PLAN.get('lt_day_k', 5000), PLAN.get('lt_eve_k', 3000)
+    if PLAN.get('lt_morning', 240) <= m < d0:
+        return day_k, 100
+    if d0 <= m < d1:
+        k = day_k - (day_k - eve_k) * (m - d0) / (d1 - d0)
+        return int(k) // 100 * 100, 100
+    return PLAN.get('lt_night_k', 2700), PLAN.get('lt_night_dim', 50)
+
+
+def ws_send(ip, params, method='setPilot'):
+    """Polecenie bez czekania na odpowiedź (nie blokuje pętli)."""
+    if not WS['sock']:
+        return
+    try:
+        WS['sock'].sendto(json.dumps({'method': method, 'params': params}).encode(), (ip, 38899))
+    except Exception as e:
+        print('ws send err', e)
+
+
+def ws_present(age=15):
+    t = time.time()
+    return {mac: x for mac, x in WS['seen'].items() if t - x['t'] <= age}
+
+
+def wiz_scan_tick():
+    import socket
+    t = time.time()
+    if WS['sock'] is None:
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                s.setsockopt(socket.SOL_SOCKET, getattr(socket, 'SO_BROADCAST', 0x20), 1)
+            except Exception as e:
+                print('so_broadcast', e)
+            s.bind(('0.0.0.0', 0))
+            s.setblocking(False)
+            WS['sock'] = s
+            WS['learn'] = t + 3600
+        except Exception as e:
+            WS['sock'] = False
+            log('zarowki: wyszukiwanie niedostepne (%s)' % e)
+    if not WS['sock']:
+        return
+    # odpowiedzi
+    for _ in range(60):
+        try:
+            data, addr = WS['sock'].recvfrom(1024)
+        except Exception:
+            break
+        try:
+            r = json.loads(data)
+        except Exception:
+            continue
+        x = r.get('result') if isinstance(r, dict) else None
+        if not isinstance(x, dict) or not x.get('mac'):
+            continue
+        WS['seen'][x['mac']] = {'ip': addr[0], 't': t, 'p': {k: x[k] for k in ('state', 'temp', 'dimming', 'sceneId') if k in x}}
+        WS['bc_ok'] = True
+    # pytanie do całej sieci co 4 s
+    if t - WS['scan'] >= 4:
+        WS['scan'] = t
+        msg = b'{"method":"getPilot","params":{}}'
+        try:
+            WS['sock'].sendto(msg, ('255.255.255.255', 38899))
+        except Exception:
+            pass
+        WS['bc'] += 1
+        if not WS['bc_ok'] and WS['bc'] >= 3:
+            # broadcast nie działa: pytamy każdy adres po kolei (64 adresy na raz)
+            base = PLAN.get('wiz_net', '192.168.100.')
+            k = (WS['bc'] % 4) * 64
+            for i in range(max(k, 2), min(k + 64, 255)):
+                try:
+                    WS['sock'].sendto(msg, (base + str(i), 38899))
+                except Exception:
+                    pass
+    if t - BOOT_T[0] < 30:
+        return
+    pres = ws_present()
+    if not WS['inv']:
+        WS['inv'] = True
+        log('zarowki w sieci: %d (%s): %s' % (len(pres), 'broadcast' if WS['bc_ok'] else 'brak odpowiedzi', ' '.join(
+            '%s=%s/%s/%s/%s' % (mac[-4:], x['ip'].split('.')[-1], 'wl' if x['p'].get('state') else 'wyl', x['p'].get('temp'), x['p'].get('dimming'))
+            for mac, x in sorted(pres.items(), key=lambda a: a[1]['ip']))))
+    # nauka klawiszy: zmiany obecności w logu
+    keys = set(pres.keys())
+    if WS['pres'] is not None and t < WS['learn']:
+        gone = WS['pres'] - keys
+        back = keys - WS['pres']
+        if gone or back:
+            def fmt(ms):
+                return ' '.join('%s(.%s)' % (m[-4:], WS['seen'][m]['ip'].split('.')[-1]) for m in sorted(ms))
+            log('zarowki: %s%s| w sieci %d' % ('zniknely %s ' % fmt(gone) if gone else '', 'wrocily %s ' % fmt(back) if back else '', len(keys)))
+    WS['pres'] = keys
+    # barwa wg pory dnia: tylko świecące żarówki (poza lampką za łóżkiem, która ma własne budzenie)
+    if PLAN.get('lt_auto', True) and t - WS['col'] >= 30 and not state.get('wl'):
+        WS['col'] = t
+        k, dim = light_target()
+        n = 0
+        for mac, x in pres.items():
+            p = x['p']
+            if x['ip'] == PLAN.get('wiz_bed') or not p.get('state'):
+                continue
+            if p.get('sceneId') or abs((p.get('temp') or 0) - k) >= 100 or abs((p.get('dimming') or 0) - dim) >= 5:
+                ws_send(x['ip'], {'temp': k, 'dimming': dim})
+                n += 1
+        if n:
+            print('barwa %sK %s%%: %d zarowek' % (k, dim, n))
 
 
 def night_lamp_guard():
@@ -1793,6 +1924,12 @@ def snap_tick():
         x = (r or {}).get('result')
         if x:
             d['wiz_' + ip] = {k: x[k] for k in ('state', 'dimming', 'temp', 'sceneId', 'r', 'g', 'b') if k in x}
+    for x in ws_present().values():  # pozostałe żarówki: stan z wyszukiwania (bez dodatkowych pytań)
+        if x['ip'] not in (PLAN.get('wiz_lamps') or []):
+            d['wiz_' + x['ip']] = dict(x['p'])
+    for key in [k for k in d if k.startswith('wiz_') and k[4:] not in (PLAN.get('wiz_lamps') or [])]:
+        if not any(x['ip'] == key[4:] for x in ws_present().values()):
+            del d[key]  # żarówka bez prądu (klawisz wyłączony): nie przywracamy jej po braku prądu
     js = json.dumps(d)
     if js == SNAP['js']:
         return
@@ -1835,7 +1972,7 @@ def restore_tick():
         st = d.get(key)
         if st and PLAN.get(key):
             plug_set(PLAN[key], bool(st.get('on')), 'prad: %s %s' % (key, 'wl' if st.get('on') else 'wyl'))
-    for ip in PLAN.get('wiz_lamps') or []:
+    for ip in [k[4:] for k in d if k.startswith('wiz_')]:
         st = d.get('wiz_' + ip)
         if st and st.get('state'):
             pr = {k: v for k, v in st.items() if k != 'state'}
@@ -1895,6 +2032,7 @@ def run():
             win_tick()
             curtains_tick()
             night_lamp_guard()
+            wiz_scan_tick()
             wiz_switch_tick(sync)
             wake_light_tick()
             restore_tick()
