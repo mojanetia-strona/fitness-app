@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.92'
+VERSION = '1.0.93'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -723,7 +723,7 @@ def bath_tick():
     W nocy świeci jedna żarówka, ciemno i ciepło."""
     if not PLAN.get('bath_motion'):
         return
-    if time.time() - MOT.get('diag', 0) > 300 and time.time() - BOOT_T[0] > 60:
+    if GW_MOT['id'] is None and time.time() - MOT.get('diag', 0) > 300 and time.time() - BOOT_T[0] > 60:
         MOT['diag'] = time.time()  # diagnostyka co 5 min: czy czujnik ruchu dociera do płytki
         bm = BTH_SEEN.get(PLAN['bath_motion'])
         if bm:
@@ -1242,6 +1242,56 @@ def gw_windows():
                 win[mac] = {'open': val, 'bat': (w or {}).get('bat'), 't': now}
     except Exception as e:
         print('gw okna', e)
+
+
+GW_MOT = {'id': None, 'map_at': 0, 'at': 0, 'fail': 0, 'val': None}
+
+
+def gw_motion():
+    """Czujnik ruchu w łazience czytany z bramki Shelly (bramka słyszy go dobrze, płytka z salonu nie):
+    co 1 s stan ruchu; dopóki czujnik pokazuje ruch, światło świeci."""
+    if not PLAN.get('bath_motion') or not cfg.get('shelly_gw'):
+        return
+    now = time.time()
+    if GW_MOT['id'] is None:
+        if now - GW_MOT['map_at'] < 300:
+            return
+        GW_MOT['map_at'] = now
+        try:
+            off = 0
+            while True:
+                res = gw_rpc('Shelly.GetComponents', '?dynamic_only=true&offset=%d' % off) or {}
+                comps = res.get('components') or []
+                for c in comps:
+                    v = c.get('config') or {}
+                    if c.get('key', '').startswith('bthomesensor:') and v.get('obj_id') == 0x21 and str(v.get('addr', '')).upper() == PLAN['bath_motion']:
+                        GW_MOT['id'] = v['id']
+                off += len(comps)
+                if not comps or off >= res.get('total', 0):
+                    break
+            log('bramka: czujnik ruchu lazienka %s' % ('id %s' % GW_MOT['id'] if GW_MOT['id'] is not None else 'nie znaleziony'))
+        except Exception as e:
+            print('gw ruch map', e)
+        return
+    if now - GW_MOT['at'] < 1 or now < GW_MOT['fail']:
+        return
+    GW_MOT['at'] = now
+    try:
+        gc.collect()
+        r = requests.get('http://%s/rpc/BTHomeSensor.GetStatus?id=%d' % (cfg['shelly_gw'], GW_MOT['id']), timeout=2)
+        try:
+            v = bool(r.json().get('value'))
+        finally:
+            r.close()
+    except Exception as e:
+        GW_MOT['fail'] = now + 30  # bramka nie odpowiada: przerwa, żeby nie blokować pętli
+        print('gw ruch', e)
+        return
+    if v:
+        if not GW_MOT['val'] or now - MOT['t'] > 20:
+            MOT['new'] = True  # nowy ruch (albo nadal ruch: odświeżamy co 20 s)
+        MOT['t'] = now
+    GW_MOT['val'] = v
 
 
 AIR_GUARD = [0]
@@ -2230,6 +2280,7 @@ def run():
             curtains_tick()
             night_lamp_guard()
             wiz_scan_tick()
+            gw_motion()
             bath_tick()
             wiz_switch_tick(sync)
             wake_light_tick()
