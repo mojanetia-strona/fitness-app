@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.82'
+VERSION = '1.0.83'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -539,7 +539,7 @@ def ws_send(ip, params, method='setPilot'):
         print('ws send err', e)
 
 
-def ws_present(age=15):
+def ws_present(age=12):
     t = time.time()
     return {mac: x for mac, x in WS['seen'].items() if t - x['t'] <= age}
 
@@ -578,10 +578,18 @@ def wiz_scan_tick():
             continue
         WS['seen'][x['mac']] = {'ip': addr[0], 't': t, 'p': {k: x[k] for k in ('state', 'temp', 'dimming', 'sceneId') if k in x}}
         WS['bc_ok'] = True
-    # pytanie do całej sieci co 4 s
-    if t - WS['scan'] >= 4:
+    msg = b'{"method":"getPilot","params":{}}'
+    # znane żarówki: pytanie bezpośrednio do każdej co 3 s (broadcast gubi odpowiedzi, obecność by migała)
+    if t - WS.get('uni', 0) >= 3:
+        WS['uni'] = t
+        for x in WS['seen'].values():
+            try:
+                WS['sock'].sendto(msg, (x['ip'], 38899))
+            except Exception:
+                pass
+    # nowe żarówki: pytanie do całej sieci co 20 s
+    if t - WS['scan'] >= 20 or (t - BOOT_T[0] < 30 and t - WS['scan'] >= 4):
         WS['scan'] = t
-        msg = b'{"method":"getPilot","params":{}}'
         try:
             WS['sock'].sendto(msg, ('255.255.255.255', 38899))
         except Exception:
