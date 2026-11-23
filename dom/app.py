@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.91'
+VERSION = '1.0.92'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -723,6 +723,16 @@ def bath_tick():
     W nocy świeci jedna żarówka, ciemno i ciepło."""
     if not PLAN.get('bath_motion'):
         return
+    if time.time() - MOT.get('diag', 0) > 300 and time.time() - BOOT_T[0] > 60:
+        MOT['diag'] = time.time()  # diagnostyka co 5 min: czy czujnik ruchu dociera do płytki
+        bm = BTH_SEEN.get(PLAN['bath_motion'])
+        if bm:
+            raw = ' '.join('%02x' % b for b in bm[1])
+            if not MOT.get('diag_ok') or bm[1][0] & 0x01:
+                MOT['diag_ok'] = True
+                log('lazienka czujnik: odebrany %ds temu, dane %s%s' % (time.time() - bm[0], raw, ' (ZASZYFROWANY)' if bm[1][0] & 0x01 else ''))
+        else:
+            log('lazienka czujnik: brak sygnalu; czujniki BTHome w zasiegu: %s' % (', '.join(sorted(BTH_SEEN.keys())) or 'zaden'))
     ips = sorted(room_ips('bath'))
     if not ips:
         return
@@ -747,7 +757,8 @@ def bath_tick():
         MOT['chk'] = time.time()
         lit = [x['ip'] for mac, x in ws_present().items() if room_of(mac) == 'bath' and x['p'].get('state')]
         if MOT['on'] or lit:
-            if lit and not MOT['on']:
+            if lit and not MOT['on'] and time.time() - MOT.get('lg', 0) > 600:
+                MOT['lg'] = time.time()
                 log('lazienka: brak ruchu, gasze (%d zarowek)' % len(lit))
             MOT['on'] = False
             for ip in ips:
@@ -1045,7 +1056,14 @@ win = {}  # mac -> {'open': 0/1, 'bat': %, 'pid': nr pakietu, 't': czas}
 BTH_LEN = {0x00: 1, 0x01: 1, 0x05: 3, 0x2D: 1, 0x3A: 1, 0x3F: 2, 0x02: 2, 0x03: 2, 0x0C: 2, 0x21: 1}
 
 
+BTH_SEEN = {}  # diagnostyka: MAC -> (czas, pierwsze bajty), czujniki BTHome w zasięgu
+
+
 def bthome(addr, p):
+    try:
+        BTH_SEEN[':'.join('%02X' % b for b in addr)] = (time.time(), p[:6])
+    except Exception:
+        pass
     if not p or p[0] & 0x01:  # zaszyfrowane: pomijamy
         return
     d, j = {}, 1
