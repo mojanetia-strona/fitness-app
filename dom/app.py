@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.89'
+VERSION = '1.0.90'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -773,6 +773,18 @@ def wake_light_tick():
     state['wl_at'] = time.time()
     p = (time.time() - wl['t0']) / (wl.get('min', PLAN['wake_light_min']) * 60.0)
     wake_ceiling(p)
+    if not PLAN.get('wake_lamp', False):
+        # lampka za łóżkiem nie bierze udziału w budzeniu (za blisko twarzy, 23.11): budzi tylko sufit
+        if p >= 1:
+            state['wl'] = None
+            state['wl_done'] = time.localtime()[2]
+            log('budzenie swiatlem: pelna jasnosc (sufit)')
+        elif not wl.get('half') and p >= 0.5:
+            wl = dict(wl)
+            wl['half'] = 1
+            state['wl'] = wl
+            log('budzenie swiatlem: polowa (sufit, %d zarowek)' % len(room_ips('bed')))
+        return
     if p >= 1:
         if wiz(wake_pilot(1.0)) is None and 'Invalid params' in str(state.get('wiz_err')):
             state['wiz_lvl'] = 2
