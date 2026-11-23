@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.93'
+VERSION = '1.0.94'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -752,7 +752,7 @@ def bath_tick():
             if night:
                 state['night_walks'] = (state.get('night_walks') or 0) + 1  # nocne wyjścia do łazienki (jakość snu)
                 log('lazienka w nocy (%d. raz tej nocy)' % state['night_walks'])
-    elif time.time() - MOT['t'] > PLAN['bath_off_night' if night else 'bath_off_day'] and time.time() - MOT.get('chk', 0) > 20:
+    elif not GW_MOT['val'] and time.time() - MOT['t'] > PLAN['bath_off_night' if night else 'bath_off_day'] and time.time() - MOT.get('chk', 0) > 20:
         # brak ruchu: gasimy, także gdy światło zapaliło się inaczej (klawisz, aplikacja)
         MOT['chk'] = time.time()
         lit = [x['ip'] for mac, x in ws_present().items() if room_of(mac) == 'bath' and x['p'].get('state')]
@@ -1244,12 +1244,63 @@ def gw_windows():
         print('gw okna', e)
 
 
-GW_MOT = {'id': None, 'map_at': 0, 'at': 0, 'fail': 0, 'val': None}
+GW_MOT = {'id': None, 'map_at': 0, 'at': 0, 'fail': 0, 'val': None, 'srv': None, 'inst': False}
+MOT_PORT = 8089
+MOT_SCRIPT = """// automatyka domu (plytka): ruch w lazience -> od razu wiadomosc do plytki (bez odpytywania)
+let SID = "bthomesensor:%d";
+Shelly.addStatusHandler(function (e) {
+  if (e.component === SID && e.delta && typeof e.delta.value !== "undefined") {
+    Shelly.call("HTTP.GET", {url: "http://%s:%d/ruch?v=" + (e.delta.value ? "1" : "0"), timeout: 3});
+  }
+});
+"""
+
+
+def gw_call(method, params):
+    body = json.dumps({'id': 1, 'method': method, 'params': params})
+    gc.collect()
+    r = requests.post('http://%s/rpc' % cfg['shelly_gw'], data=body, headers={'Content-Type': 'application/json'}, timeout=8)
+    try:
+        j = r.json()
+    finally:
+        r.close()
+    if 'error' in j:
+        raise OSError(str(j['error']))
+    return j.get('result')
+
+
+def mot_install():
+    """Wgrywa do bramki Shelly mały skrypt: przy zmianie czujnika ruchu bramka sama wysyła wiadomość do płytki."""
+    my_ip = network.WLAN(network.STA_IF).ifconfig()[0]
+    code = MOT_SCRIPT % (GW_MOT['id'], my_ip, MOT_PORT)
+    sid = None
+    for sc in (gw_call('Script.List', {}) or {}).get('scripts') or []:
+        if sc.get('name') == 'lazienka_ruch':
+            sid = sc.get('id')
+    if sid is None:
+        sid = gw_call('Script.Create', {'name': 'lazienka_ruch'})['id']
+    try:
+        gw_call('Script.Stop', {'id': sid})
+    except Exception:
+        pass
+    gw_call('Script.PutCode', {'id': sid, 'code': code})
+    gw_call('Script.SetConfig', {'id': sid, 'config': {'enable': True}})
+    gw_call('Script.Start', {'id': sid})
+    log('bramka: skrypt ruchu lazienki wgrany (id %s, wiadomosci na %s:%d)' % (sid, my_ip, MOT_PORT))
+
+
+def mot_set(v, why):
+    now = time.time()
+    if v and not GW_MOT['val']:
+        MOT['new'] = True
+    MOT['t'] = now  # ruch: od teraz; brak ruchu: od teraz liczy się czas do zgaszenia
+    GW_MOT['val'] = v
 
 
 def gw_motion():
-    """Czujnik ruchu w łazience czytany z bramki Shelly (bramka słyszy go dobrze, płytka z salonu nie):
-    co 1 s stan ruchu; dopóki czujnik pokazuje ruch, światło świeci."""
+    """Czujnik ruchu w łazience przez bramkę Shelly (płytka z salonu go nie słyszy, bramka tak).
+    Bramka sama wysyła płytce wiadomość przy każdej zmianie (skrypt w bramce), płytka tylko nasłuchuje;
+    raz na minutę sprawdzenie stanu w bramce na wypadek zgubionej wiadomości."""
     if not PLAN.get('bath_motion') or not cfg.get('shelly_gw'):
         return
     now = time.time()
@@ -1273,7 +1324,46 @@ def gw_motion():
         except Exception as e:
             print('gw ruch map', e)
         return
-    if now - GW_MOT['at'] < 1 or now < GW_MOT['fail']:
+    # nasłuch wiadomości od bramki (bez blokowania pętli)
+    if GW_MOT['srv'] is None:
+        try:
+            import socket
+            srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            srv.bind(('0.0.0.0', MOT_PORT))
+            srv.listen(2)
+            srv.setblocking(False)
+            GW_MOT['srv'] = srv
+        except Exception as e:
+            GW_MOT['srv'] = False
+            log('lazienka: nasluch niedostepny (%s)' % e)
+    if GW_MOT['srv']:
+        for _ in range(3):
+            try:
+                c, _a = GW_MOT['srv'].accept()
+            except Exception:
+                break
+            try:
+                c.settimeout(1)
+                req = c.recv(256)
+                c.send(b'HTTP/1.0 200 OK\r\nContent-Length: 2\r\n\r\nok')
+                if b'/ruch?v=1' in req:
+                    mot_set(True, 'bramka')
+                elif b'/ruch?v=0' in req:
+                    mot_set(False, 'bramka')
+            except Exception as e:
+                print('ruch req', e)
+            finally:
+                c.close()
+    if not GW_MOT['inst'] and now - GW_MOT.get('inst_at', 0) > 600:
+        GW_MOT['inst_at'] = now
+        try:
+            mot_install()
+            GW_MOT['inst'] = True
+        except Exception as e:
+            log('bramka: nie udalo sie wgrac skryptu ruchu (%s), sprawdzam co minute' % e)
+    # zapas: raz na minutę stan prosto z bramki
+    if now - GW_MOT['at'] < 60 or now < GW_MOT['fail']:
         return
     GW_MOT['at'] = now
     try:
@@ -1284,14 +1374,11 @@ def gw_motion():
         finally:
             r.close()
     except Exception as e:
-        GW_MOT['fail'] = now + 30  # bramka nie odpowiada: przerwa, żeby nie blokować pętli
+        GW_MOT['fail'] = now + 120
         print('gw ruch', e)
         return
-    if v:
-        if not GW_MOT['val'] or now - MOT['t'] > 20:
-            MOT['new'] = True  # nowy ruch (albo nadal ruch: odświeżamy co 20 s)
-        MOT['t'] = now
-    GW_MOT['val'] = v
+    if v != bool(GW_MOT['val']):
+        mot_set(v, 'sprawdzenie')
 
 
 AIR_GUARD = [0]
