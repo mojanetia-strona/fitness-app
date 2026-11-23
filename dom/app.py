@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.90'
+VERSION = '1.0.91'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -487,6 +487,12 @@ def wiz_switch_tick(sync):
                 break
             ip = addr[0]
             if b'firstBeat' in data:  # rozgłasza to tylko żarówka WiZ, która właśnie dostała prąd
+                try:
+                    fm = (json.loads(data).get('params') or {}).get('mac')
+                    if fm:  # od razu wiemy, która to żarówka (i w którym pomieszczeniu)
+                        WS['seen'][fm] = {'ip': ip, 't': time.time(), 'p': {'state': False}}
+                except Exception:
+                    pass
                 if time.time() - WZ.setdefault('fb', {}).get(ip, 0) < 30:
                     continue  # żarówka rozgłasza firstBeat kilka razy pod rząd
                 WZ['fb'][ip] = time.time()
@@ -649,15 +655,16 @@ def wiz_scan_tick():
         except Exception:
             pass
         WS['bc'] += 1
-        if not WS['bc_ok'] and WS['bc'] >= 3:
-            # broadcast nie działa: pytamy każdy adres po kolei (64 adresy na raz)
-            base = PLAN.get('wiz_net', '192.168.100.')
-            k = (WS['bc'] % 4) * 64
-            for i in range(max(k, 2), min(k + 64, 255)):
-                try:
-                    WS['sock'].sendto(msg, (base + str(i), 38899))
-                except Exception:
-                    pass
+        WS['sw'] = 2  # do tego przegląd każdego adresu w sieci (broadcast gubi część żarówek)
+    if WS.get('sw'):
+        base = PLAN.get('wiz_net', '192.168.100.')
+        a = WS['sw']
+        for i in range(a, min(a + 16, 255)):
+            try:
+                WS['sock'].sendto(msg, (base + str(i), 38899))
+            except Exception:
+                pass
+        WS['sw'] = 0 if a + 16 >= 255 else a + 16
     if t - BOOT_T[0] < 30:
         return
     pres = ws_present()
@@ -731,14 +738,20 @@ def bath_tick():
                 ws_send(ip, {'state': False})
         if not MOT['on']:
             MOT['on'] = True
-            print('lazienka ruch: on %sK %s%%' % (k, dim))
+            log('lazienka ruch: on %sK %s%%' % (k, dim))
             if night:
                 state['night_walks'] = (state.get('night_walks') or 0) + 1  # nocne wyjścia do łazienki (jakość snu)
                 log('lazienka w nocy (%d. raz tej nocy)' % state['night_walks'])
-    elif MOT['on'] and time.time() - MOT['t'] > PLAN['bath_off_night' if night else 'bath_off_day']:
-        MOT['on'] = False
-        for ip in ips:
-            ws_send(ip, {'state': False})
+    elif time.time() - MOT['t'] > PLAN['bath_off_night' if night else 'bath_off_day'] and time.time() - MOT.get('chk', 0) > 20:
+        # brak ruchu: gasimy, także gdy światło zapaliło się inaczej (klawisz, aplikacja)
+        MOT['chk'] = time.time()
+        lit = [x['ip'] for mac, x in ws_present().items() if room_of(mac) == 'bath' and x['p'].get('state')]
+        if MOT['on'] or lit:
+            if lit and not MOT['on']:
+                log('lazienka: brak ruchu, gasze (%d zarowek)' % len(lit))
+            MOT['on'] = False
+            for ip in ips:
+                ws_send(ip, {'state': False})
 
 
 def night_lamp_guard():
@@ -1895,12 +1908,7 @@ def tick_rules(sync, q):
     if m >= PLAN['night_from'] and state.get('cur_state') != 'close' and once('cur_eve'):
         curtains('close', 'wieczor 21:00')
 
-    # --- godzinę po zachodzie słońca, jestem w domu: lampa salon i LED-y w kuchni (dawne „Światło Wieczór”) ---
-    if not asleep and not state.get('away') and m >= sun_min(False) + 60 and once('eve_light'):
-        log('wieczor: lampa salon i kuchnia led on')
-        for key in ('lamp_salon', 'kitchen_led'):
-            if PLAN.get(key):
-                plug_set(PLAN[key], True, key + ' on')
+    # (1.0.91: usunięte dawne „Światło Wieczór”: lampa salon tylko po powrocie wieczorem, LED-y wieczorem nigdy)
 
     # --- salon: moc nawilżacza według Qingpinga ---
     if rh is not None and not air('s') and not asleep:  # w nocy nie ruszamy trybu nocnego
