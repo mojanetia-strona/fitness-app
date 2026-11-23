@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.85'
+VERSION = '1.0.86'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -1532,10 +1532,17 @@ def pc_tick():
             r.close()
     except Exception:
         return
+    if PC['on'] and on is False:
+        # komputer wyłączony: LED-y w kuchni off (wieczorem po zmierzchu zostają jako światło klimatyczne)
+        m = mins()
+        if PLAN.get('kitchen_led') and not (m >= sun_min(False) or m < 240):
+            plug_set(PLAN['kitchen_led'], False, 'komputer wylaczony: kuchnia led off')
     if PC['on'] is False and on:
         PC['evt'] = True
         NOW[0] = True
         log('komputer wlaczony')
+        if PLAN.get('kitchen_led') and not state.get('asleep'):
+            plug_set(PLAN['kitchen_led'], True, 'komputer wlaczony: kuchnia led on')
         mo = state.get('morn')
         if mo and not mo.get('we') and not mo.get('pc'):
             mo = dict(mo)
@@ -1717,13 +1724,14 @@ def tick_rules(sync, q):
             elif not asleep:
                 # dawne rutyny „Powrót do domu Pon-Pt”, „DOM Weekend ON” i „Światło Wieczór”, bez ich okienek godzinowych
                 bed_ok = weekend or m >= 1080  # Pon-Pt sypialnia dopiero od 18:00
-                log('powrot do domu: salon on%s%s' % (', sypialnia on' if bed_ok else '', ', swiatla' if is_evening(m) else ''))
+                eve = (m >= max(1080, sun_min(False))) or m < 240  # wieczór = po zmierzchu, ale nie wcześniej niż 18:00
+                log('powrot do domu: salon on%s%s' % (', sypialnia on' if bed_ok else '', ', wieczor' if eve else ''))
                 hum_on('salon_hum', 's', None)
                 hum_on('salon_pur', 's', None)
                 if bed_ok:
                     hum_on('bed_hum', 'b', None)
                     state['bed_eve'] = day_key()
-                if is_evening(m):  # wieczorem tylko klimatyczne światło: lampa za kanapą i LED-y pod szafkami
+                if eve:  # wieczorem tylko klimatyczne światło: lampa za kanapą i LED-y pod szafkami
                     for key in ('lamp_salon', 'kitchen_led'):
                         if PLAN.get(key):
                             plug_set(PLAN[key], True, key + ' on')
