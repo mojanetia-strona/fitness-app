@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.88'
+VERSION = '1.0.89'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -754,6 +754,17 @@ def night_lamp_guard():
             log('noc: lampka sypialnia zapalila sie po zaniku pradu, gasze')
 
 
+def wake_ceiling(p):
+    """Sufit w sypialni (żarówki bez koloru) razem z lampką: od ciemnej ciepłej bieli do jasnej 3500 K."""
+    if not PLAN.get('wake_ceiling', True):
+        return
+    p = max(0.0, min(1.0, p))
+    dim = int(10 + 90 * p ** 2.5 + 0.5)
+    k = (2700 + int(800 * p ** 1.5)) // 100 * 100
+    for ip in room_ips('bed'):
+        ws_send(ip, {'state': True, 'temp': k, 'dimming': dim})
+
+
 def wake_light_tick():
     """Co 15 s podczas rozjaśniania: kolejny krok jasności."""
     wl = state.get('wl')
@@ -761,6 +772,7 @@ def wake_light_tick():
         return
     state['wl_at'] = time.time()
     p = (time.time() - wl['t0']) / (wl.get('min', PLAN['wake_light_min']) * 60.0)
+    wake_ceiling(p)
     if p >= 1:
         if wiz(wake_pilot(1.0)) is None and 'Invalid params' in str(state.get('wiz_err')):
             state['wiz_lvl'] = 2
@@ -1735,6 +1747,7 @@ def tick_rules(sync, q):
                 if eve:  # wieczorem: lampa za kanapą + salon i kuchnia klimatycznie (LED-y w kuchni za mocne: off)
                     state['eve_ret'] = day_key()
                     room_set('work', True, 'powrot wieczorem, klimatycznie')
+                    room_set('bed', True, 'powrot wieczorem')  # sypialnia ciepło, przygaszona
                     if PLAN.get('lamp_salon'):
                         plug_set(PLAN['lamp_salon'], True, 'lamp_salon on')
                     if PLAN.get('kitchen_led'):
@@ -1828,6 +1841,7 @@ def tick_rules(sync, q):
     if was and not asleep and ph and ph.get('e') == 'up':
         log('rano: telefon zdjety')
         state['morn'] = {'t0': time.time(), 'we': is_weekend()}
+        room_set('bed', False, 'wstalem')  # sufit w sypialni gaśnie (wychodzę z sypialni)
         state['night_walks'] = 0
         room_set('work', True, 'rano')  # salon i kuchnia: ciepłe 65% do komputera (weekend: 1 h)
         # wstałem i wychodzę z sypialni: lampka off na każdym etapie rozjaśniania (a jeśli się nie zaczęło, już nie ruszy)
