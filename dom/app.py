@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.84'
+VERSION = '1.0.85'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -65,6 +65,9 @@ PLAN = {
     # (mignięcie prądu w nocy niczego nie zapala); poza nocą płytka zapala ją od razu po powrocie do sieci ---
     'wiz_switch': True,
     'wiz_lamps': ['192.168.100.37'],  # żarówki obsługiwane tak (kolejne dopisywać po dostawie)
+    'bath_motion': '74:0B:12:94:53:38',  # Shelly BLU Motion ZB w łazience (czytany Bluetoothem płytki)
+    'bath_off_day': 300,    # łazienka gaśnie po tylu s bez ruchu (dzień)
+    'bath_off_night': 120,  # ... w nocy
     'wake_light': True,
     'wake_light_min': 30,   # tyle trwa rozjaśnianie (od ciemnego pomarańczu do jasnej bieli)
     'wake_light_wd': 420,   # zapas, gdy nie znamy pory zaśnięcia: w tygodniu start nie wcześniej niż 7:00 ...
@@ -440,8 +443,11 @@ def wiz_power_on(ip, why):
         log('klawisz: %s wrocila do sieci (%s), mnie nie ma - zostaje zgaszona' % (ip[-3:], why))
         return
     pr = {'state': True}
-    if ip != PLAN.get('wiz_bed') and PLAN.get('lt_auto', True):
-        pr['temp'], pr['dimming'] = light_target()  # od razu barwa wg pory dnia
+    mac = ([m for m, x in WS['seen'].items() if x['ip'] == ip] or [''])[0]
+    if ip != PLAN.get('wiz_bed') and mac[-4:].lower() != BED_LAMP and PLAN.get('lt_auto', True):
+        if room_of(mac) == 'bath':
+            return  # łazienkę zapala tylko czujnik ruchu
+        pr['temp'], pr['dimming'] = light_target(room_of(mac) or 'work')  # od razu barwa pomieszczenia
     ok = wiz(pr, 'setPilot', ip) is not None
     WZ['st'][ip] = True if ok else WZ['st'].get(ip)
     log('klawisz: %s zapalona (%s)' % (ip[-3:], why) if ok else 'klawisz: %s nie odpowiada (%s)' % (ip[-3:], state.get('wiz_err')))
@@ -516,17 +522,61 @@ def wiz_switch_tick(sync):
 WS = {'sock': None, 'seen': {}, 'scan': 0, 'bc': 0, 'bc_ok': False, 'learn': 0, 'pres': None, 'inv': False, 'col': 0}
 
 
-def light_target(m=None):
-    """Barwa i jasność wg pory dnia: dzień 5000 K, od 16:00 coraz cieplej do 3000 K o 21:00, noc 2700 K przygaszone."""
+# żarówki wg pomieszczeń (końcówka MAC, nauka klawiszy 23.11); salon i kuchnia to jedna strefa „praca”
+ROOMS = {
+    'bed': ('ed20', '983c', '67ea', '6032', '4754', 'e994', '9554', '6906'),
+    'bath': ('ecc6', 'eb7e', 'f22c'),
+    'work': ('6534', '5f96', '9544', 'e7ee', '6682', '68fa', '48b0', '677e',   # kuchnia pionowo / poziomo
+             '6368', '62e4', '49b4', '64b2', '6410', '5e8c', '66ec', '623a'),  # salon pionowo / poziomo
+}
+BED_LAMP = 'd3e2'  # lampka za łóżkiem: własne budzenie, barwy nie ruszamy
+
+
+def room_of(mac):
+    sfx = mac[-4:].lower()
+    for r, ms in ROOMS.items():
+        if sfx in ms:
+            return r
+    return None
+
+
+def room_ips(room):
+    return [x['ip'] for mac, x in WS['seen'].items() if room_of(mac) == room]
+
+
+def morning_on():
+    """Tryb poranny: od wstania; w tygodniu do włączenia komputera (najdłużej 3 h), w weekend 1 h."""
+    mo = state.get('morn')
+    if not mo:
+        return False
+    age = time.time() - mo['t0']
+    if mo.get('we'):
+        return age < 3600
+    return age < 3 * 3600 and not mo.get('pc')
+
+
+def light_target(room='work', m=None):
+    """Barwa (K) i jasność (%) dla pomieszczenia teraz. Ustalone z Łukaszem 23.11."""
     m = mins() if m is None else m
-    d0, d1 = PLAN.get('lt_warm_from', 960), PLAN.get('lt_warm_to', 1260)
-    day_k, eve_k = PLAN.get('lt_day_k', 5000), PLAN.get('lt_eve_k', 3000)
-    if PLAN.get('lt_morning', 240) <= m < d0:
-        return day_k, 100
-    if d0 <= m < d1:
-        k = day_k - (day_k - eve_k) * (m - d0) / (d1 - d0)
+    ss = sun_min(False)
+    dark = m >= ss or m < 240  # po zachodzie słońca (zmierzch) do 4:00
+    if room == 'bath':
+        if state.get('asleep'):
+            return 2700, 15        # noc: jedna żarówka, ciemno i ciepło
+        if morning_on():
+            return 6000, 100       # rano: białe, jasne, rozbudza
+        return (3500, 90) if dark else (5000, 100)
+    if room == 'bed':
+        return 2700, (60 if dark else 100)  # zawsze ciepło, po zmierzchu przygaszone
+    # salon + kuchnia
+    if state.get('asleep'):
+        return 2700, 50
+    if morning_on():
+        return 3000, 65            # rano: ciepłe, nie dzienne
+    if dark:
+        k = 5000 - 2000 * min(1.0, ((m - ss) % 1440) / 120.0)  # od zmierzchu przez 2 h do 3000 K
         return int(k) // 100 * 100, 100
-    return PLAN.get('lt_night_k', 2700), PLAN.get('lt_night_dim', 50)
+    return 5000, 100
 
 
 def ws_send(ip, params, method='setPilot'):
@@ -627,17 +677,66 @@ def wiz_scan_tick():
     # barwa wg pory dnia: tylko świecące żarówki (poza lampką za łóżkiem, która ma własne budzenie)
     if PLAN.get('lt_auto', True) and t - WS['col'] >= 30 and not state.get('wl'):
         WS['col'] = t
-        k, dim = light_target()
-        n = 0
+        tg = {}
         for mac, x in pres.items():
             p = x['p']
-            if x['ip'] == PLAN.get('wiz_bed') or not p.get('state'):
+            room = room_of(mac)
+            if mac[-4:].lower() == BED_LAMP or x['ip'] == PLAN.get('wiz_bed') or not p.get('state'):
                 continue
+            if room not in tg:
+                tg[room] = light_target(room or 'work')
+            k, dim = tg[room]
             if p.get('sceneId') or abs((p.get('temp') or 0) - k) >= 100 or abs((p.get('dimming') or 0) - dim) >= 5:
                 ws_send(x['ip'], {'temp': k, 'dimming': dim})
-                n += 1
-        if n:
-            print('barwa %sK %s%%: %d zarowek' % (k, dim, n))
+
+
+MOT = {'t': 0, 'new': False, 'on': False}
+
+
+def room_set(room, on, why=''):
+    """Zapala (w barwie pomieszczenia) albo gasi wszystkie żarówki pomieszczenia, bez czekania na odpowiedź."""
+    ips = room_ips(room)
+    if not ips:
+        return
+    if on:
+        k, dim = light_target(room)
+        for ip in ips:
+            ws_send(ip, {'state': True, 'temp': k, 'dimming': dim})
+    else:
+        for ip in ips:
+            ws_send(ip, {'state': False})
+    if why:
+        log('swiatla %s %s (%s, %d zarowek)' % (room, 'on' if on else 'off', why, len(ips)))
+
+
+def bath_tick():
+    """Łazienka tylko na czujnik: ruch -> światło w trybie pory, cisza 5 min (w nocy 2 min) -> zgaszone.
+    W nocy świeci jedna żarówka, ciemno i ciepło."""
+    if not PLAN.get('bath_motion'):
+        return
+    ips = sorted(room_ips('bath'))
+    if not ips:
+        return
+    night = bool(state.get('asleep'))
+    if MOT['new']:
+        MOT['new'] = False
+        k, dim = light_target('bath')
+        use = ips[:1] if night else ips
+        for ip in use:
+            ws_send(ip, {'state': True, 'temp': k, 'dimming': dim})
+        if night:
+            for ip in ips[1:]:
+                ws_send(ip, {'state': False})
+        if not MOT['on']:
+            MOT['on'] = True
+            print('lazienka ruch: on %sK %s%%' % (k, dim))
+            if night:
+                state['night_walks'] = (state.get('night_walks') or 0) + 1  # nocne wyjścia do łazienki (jakość snu)
+                log('lazienka w nocy (%d. raz tej nocy)' % state['night_walks'])
+    elif MOT['on'] and time.time() - MOT['t'] > PLAN['bath_off_night' if night else 'bath_off_day']:
+        MOT['on'] = False
+        for ip in ips:
+            ws_send(ip, {'state': False})
 
 
 def night_lamp_guard():
@@ -918,9 +1017,14 @@ def bthome(addr, p):
             break
         d[oid] = p[j + 1]
         j += 1 + n
+    mac = ':'.join('%02X' % b for b in addr)
+    if 0x21 in d and mac == PLAN.get('bath_motion'):
+        if d[0x21]:
+            MOT['t'] = time.time()  # ruch w łazience (obsługa w pętli: bath_tick)
+            MOT['new'] = True
+        return
     if 0x2D not in d:
         return
-    mac = ':'.join('%02X' % b for b in addr)
     w = win.get(mac) or {}
     w['open'] = d[0x2D]
     w['bat'] = d.get(0x01, w.get('bat'))
@@ -1432,6 +1536,12 @@ def pc_tick():
         PC['evt'] = True
         NOW[0] = True
         log('komputer wlaczony')
+        mo = state.get('morn')
+        if mo and not mo.get('we') and not mo.get('pc'):
+            mo = dict(mo)
+            mo['pc'] = True
+            state['morn'] = mo  # w tygodniu poranne ciepłe światło kończy się z włączeniem komputera
+            WS['col'] = 0  # barwa dzienna od razu
     PC['on'] = on
 
 
@@ -1468,7 +1578,7 @@ def day_key():
     return '%04d%02d%02d' % (tm[0], tm[1], tm[2])
 
 
-SAVE_KEYS = ('asleep', 'bed_off_at', 'bed_eve', 'night_on', 'bed_pause', 'air', 'wl', 'sleep_at', 'robot_ev', 'robot_day', 'wiz_lvl',
+SAVE_KEYS = ('morn', 'night_walks', 'asleep', 'bed_off_at', 'bed_eve', 'night_on', 'bed_pause', 'air', 'wl', 'sleep_at', 'robot_ev', 'robot_day', 'wiz_lvl',
              'cur_want', 'cur_why', 'cur_state', 'cur_day', 'boost_day', 'away_ev', 'away',
              'rate_s', 'rate_b', 'heat_s', 'heat_b')
 
@@ -1601,6 +1711,9 @@ def tick_rules(sync, q):
                         plug_set(PLAN[key], False, key + ' off')
                 if PLAN.get('wiz_bed'):
                     wiz({'state': False})
+                for r in ('work', 'bed', 'bath'):
+                    room_set(r, False)
+                log('wyjscie: zarowki off')
             elif not asleep:
                 # dawne rutyny „Powrót do domu Pon-Pt”, „DOM Weekend ON” i „Światło Wieczór”, bez ich okienek godzinowych
                 bed_ok = weekend or m >= 1080  # Pon-Pt sypialnia dopiero od 18:00
@@ -1614,6 +1727,8 @@ def tick_rules(sync, q):
                     for key in ('lamp_salon', 'kitchen_led'):
                         if PLAN.get(key):
                             plug_set(PLAN[key], True, key + ' on')
+                else:
+                    room_set('work', True, 'powrot w dzien')  # cały salon i kuchnia
             if not state['away'] and dev.get('robot') and PLAN.get('robot_dock'):
                 # wracam: robot na stację, nawet jeśli nie skończył (dawne „Zadokuj Robota”)
                 try:
@@ -1631,6 +1746,11 @@ def tick_rules(sync, q):
     # --- zasypianie: telefon odłożony na noc ---
     if asleep and not was:
         log('noc: telefon odlozony')
+        state['morn'] = None
+        state['night_walks'] = 0
+        for r in ('work', 'bed', 'bath'):
+            room_set(r, False)
+        MOT['on'] = False
         try:
             _, _, _, h, mi = parse_iso(ph['t'])
             state['sleep_at'] = h * 60 + mi  # pora odłożenia telefonu: od niej liczymy 8 h snu
@@ -1695,6 +1815,9 @@ def tick_rules(sync, q):
     # --- wstałem: telefon zdjęty rano ---
     if was and not asleep and ph and ph.get('e') == 'up':
         log('rano: telefon zdjety')
+        state['morn'] = {'t0': time.time(), 'we': is_weekend()}
+        state['night_walks'] = 0
+        room_set('work', True, 'rano')  # salon i kuchnia: ciepłe 65% do komputera (weekend: 1 h)
         # wstałem i wychodzę z sypialni: lampka off na każdym etapie rozjaśniania (a jeśli się nie zaczęło, już nie ruszy)
         if PLAN['wake_light'] and PLAN.get('wiz_bed'):
             was_on = state.get('wl') is not None or state.get('wl_done') == time.localtime()[2]
@@ -2043,6 +2166,7 @@ def run():
             curtains_tick()
             night_lamp_guard()
             wiz_scan_tick()
+            bath_tick()
             wiz_switch_tick(sync)
             wake_light_tick()
             restore_tick()
