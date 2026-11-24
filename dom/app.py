@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.110'
+VERSION = '1.0.111'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -487,6 +487,7 @@ def wiz_switch_tick(sync):
                 break
             ip = addr[0]
             if b'firstBeat' in data:  # rozgłasza to tylko żarówka WiZ, która właśnie dostała prąd
+                fm = None
                 try:
                     fm = (json.loads(data).get('params') or {}).get('mac')
                     if fm:  # od razu wiemy, która to żarówka (i w którym pomieszczeniu)
@@ -498,7 +499,9 @@ def wiz_switch_tick(sync):
                 WZ['fb'][ip] = time.time()
                 WZ['on'][ip] = True
                 WZ['miss'][ip] = 0
-                wiz_power_on(ip, 'firstBeat')
+                # nie od razu: czekamy 4 s, czy to klawisz (żarówki jednego pomieszczenia), czy sieć/prąd (wszystkie naraz)
+                WZ.setdefault('pend', {})[ip] = (time.time(), fm)
+    fb_process()
     # zapas „zniknęła i wróciła zgaszona” wyłączony od 1.0.97: przy 28 żarówkach Wi-Fi gubi odpowiedzi
     # i zapalał żarówki bez klawisza; wystarcza firstBeat
     if not PLAN.get('wiz_backup', False):
@@ -852,6 +855,36 @@ def bath_tick():
             MOT['on'] = False
             for ip in ips:
                 ws_send(ip, {'state': False})
+
+
+def fb_process():
+    """firstBeat = żarówka (ponownie) połączyła się z Wi-Fi: po włączeniu klawisza, ale też po restarcie routera,
+    zmianie kanału czy mignięciu prądu. Klawisz zasila jedno pomieszczenie, więc zapalamy tylko wtedy, gdy w ciągu
+    kilku sekund zgłosiły się żarówki z jednego pomieszczenia. Gdy naraz z kilku pomieszczeń: to sieć albo prąd,
+    nic nie zapalamy (24.11 rano zmiana kanału w routerze zapaliła żarówki w sypialni)."""
+    pend = WZ.get('pend')
+    if not pend:
+        return
+    now = time.time()
+    if now - min(t for t, _ in pend.values()) < 4:
+        return
+    def room_ip(ip):
+        if ip == PLAN.get('wiz_bed'):
+            return 'lamp'
+        for mac, x in WS['seen'].items():
+            if x['ip'] == ip:
+                return room_of(mac) or mac[-4:].lower()
+        return ip
+    rooms = set(room_ip(ip) for ip in pend)
+    ips = list(pend.keys())
+    WZ['pend'] = {}
+    if now - BOOT_T[0] < 120:
+        return  # tuż po starcie płytki to nie klawisz
+    if len(rooms) > 1:
+        log('zarowki: %d naraz z kilku pomieszczen (%s) - siec/prad, nic nie zapalam' % (len(ips), ','.join(sorted(str(r) for r in rooms))))
+        return
+    for ip in ips:
+        wiz_power_on(ip, 'firstBeat')
 
 
 def night_lamp_guard():
