@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.122'
+VERSION = '1.0.123'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -589,8 +589,9 @@ def light_target(room='work', m=None):
         return 2700, 50
     if morning_on():
         return 3000, 65            # rano: ciepłe, nie dzienne
-    if dark and state.get('eve_ret') == day_key():
-        return PLAN.get('eve_k', 2700), PLAN.get('eve_dim', 40)  # wieczór po powrocie: klimatycznie, delikatnie
+    if dark and (state.get('eve_ret') == day_key() or m >= PLAN.get('eve_from', 1140) or m < 240):
+        # tryb wieczór: po zmierzchu i od 19:00 (albo po powrocie po zmroku): klimatycznie, delikatnie
+        return PLAN.get('eve_k', 2700), PLAN.get('eve_dim', 40)
     if dark:
         k = 5000 - 2000 * min(1.0, ((m - ss) % 1440) / 120.0)  # od zmierzchu przez 2 h do 3000 K
         return int(k) // 100 * 100, 100
@@ -2522,7 +2523,17 @@ def tick_rules(sync, q):
     if not nl_mode() and m >= PLAN['night_from'] and state.get('cur_state') != 'close' and once('cur_eve'):
         curtains('close', 'wieczor 21:00')
 
-    # (1.0.91: usunięte dawne „Światło Wieczór”: lampa salon tylko po powrocie wieczorem, LED-y wieczorem nigdy)
+    # --- tryb wieczór (24.11): po zmierzchu i od 19:00, gdy jestem w domu: Lampa Salon ON, salon i kuchnia
+    # przechodzą na 2700 K 40% (light_target; zapalone żarówki płytka przestawia sama), LED-y kuchni wieczorem nigdy ---
+    if (m >= PLAN.get('eve_from', 1140) and m >= sun_min(False) and not asleep and not state.get('away')
+            and not nl_eve_on() and once('eve19')):
+        log('wieczor: po zmierzchu i po 19:00, tryb wieczor (salon i kuchnia 2700K 40%, lampa salon)')
+        if PLAN.get('lamp_salon'):
+            plug_set(PLAN['lamp_salon'], True, 'lamp_salon on (wieczor)')
+        for r in ('work',):
+            ips = [x['ip'] for mac, x in ws_present().items() if room_of(mac) == r and x['p'].get('state')]
+            if ips:
+                room_set(r, True, 'wieczor')
 
     # --- salon: moc nawilżacza według Qingpinga ---
     if rh is not None and not air('s') and not asleep:  # w nocy nie ruszamy trybu nocnego
