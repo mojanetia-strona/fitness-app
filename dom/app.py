@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.123'
+VERSION = '1.0.124'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -582,7 +582,10 @@ def light_target(room='work', m=None):
         if morning_on():
             return 6000, 100       # rano: białe, jasne, rozbudza
         return (2700, 45) if dark else (5000, 100)  # po zmierzchu ciepło i przygaszone, relaksująco
+    eve = dark and (state.get('eve_ret') == day_key() or m >= PLAN.get('eve_from', 1140) or m < 240)
     if room == 'bed':
+        if eve:
+            return PLAN.get('eve_k', 2700), PLAN.get('eve_dim', 40)  # tryb wieczór: jak salon i kuchnia
         return 2700, (60 if dark else 100)  # zawsze ciepło, po zmierzchu przygaszone
     # salon + kuchnia
     if state.get('asleep'):
@@ -1135,11 +1138,13 @@ def nl_event(on):
         # lampka po 21:00: wszystko gaśnie poza lampą za kanapą, łazienka nocna, zasłony zasuwane
         state['nl_eve'] = time.time()
         cozy = PLAN['night_from'] <= m < 1320
-        log('lampka nocna on: gasze wszystko poza lampa salon%s' % (', lampka za lozkiem przytulnie do 22:00' if cozy else ''))
+        log('lampka nocna on: gasze wszystko, zapalam lampe salon%s' % (', lampka za lozkiem przytulnie do 22:00' if cozy else ''))
         for r in ('work', 'bed'):
             room_set(r, False, 'lampka nocna')
         if PLAN.get('kitchen_led'):
             plug_set(PLAN['kitchen_led'], False, 'kuchnia led off')
+        if PLAN.get('lamp_salon'):
+            plug_set(PLAN['lamp_salon'], True, 'lampa salon on (czytanie)')  # jedyne światło w salonie przed nocą
         if PLAN.get('wiz_bed'):
             if cozy:
                 state['cozy'] = day_key()
@@ -2378,12 +2383,10 @@ def tick_rules(sync, q):
                 if bed_ok:
                     hum_on('bed_hum', 'b', None)
                     state['bed_eve'] = day_key()
-                if eve:  # wieczorem: lampa za kanapą + salon i kuchnia klimatycznie (LED-y w kuchni za mocne: off)
+                if eve:  # wieczorem: salon, kuchnia i sypialnia klimatycznie (LED-y w kuchni za mocne: off; Lampa Salon tylko do czytania)
                     state['eve_ret'] = day_key()
                     room_set('work', True, 'powrot wieczorem, klimatycznie')
                     room_set('bed', True, 'powrot wieczorem')  # sypialnia ciepło, przygaszona
-                    if PLAN.get('lamp_salon'):
-                        plug_set(PLAN['lamp_salon'], True, 'lamp_salon on')
                     if PLAN.get('kitchen_led'):
                         plug_set(PLAN['kitchen_led'], False, 'kitchen_led off (wieczor)')
                 else:
@@ -2527,10 +2530,8 @@ def tick_rules(sync, q):
     # przechodzą na 2700 K 40% (light_target; zapalone żarówki płytka przestawia sama), LED-y kuchni wieczorem nigdy ---
     if (m >= PLAN.get('eve_from', 1140) and m >= sun_min(False) and not asleep and not state.get('away')
             and not nl_eve_on() and once('eve19')):
-        log('wieczor: po zmierzchu i po 19:00, tryb wieczor (salon i kuchnia 2700K 40%, lampa salon)')
-        if PLAN.get('lamp_salon'):
-            plug_set(PLAN['lamp_salon'], True, 'lamp_salon on (wieczor)')
-        for r in ('work',):
+        log('wieczor: po zmierzchu i po 19:00, tryb wieczor (salon, kuchnia i sypialnia 2700K 40%)')
+        for r in ('work', 'bed'):
             ips = [x['ip'] for mac, x in ws_present().items() if room_of(mac) == r and x['p'].get('state')]
             if ips:
                 room_set(r, True, 'wieczor')
