@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.120'
+VERSION = '1.0.121'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -881,8 +881,14 @@ def bath_tick():
             if night:
                 state['night_walks'] = (state.get('night_walks') or 0) + 1  # nocne wyjścia do łazienki (jakość snu)
                 log('lazienka w nocy (%d. raz tej nocy)' % state['night_walks'])
-    elif not GW_MOT['val'] and time.time() - MOT.get('lt', MOT['t']) > bath_timeout(night) and time.time() - MOT.get('chk', 0) > 20:
-        # brak ruchu: gasimy, także gdy światło zapaliło się inaczej (klawisz, aplikacja)
+    elif time.time() - MOT.get('lt', MOT['t']) > bath_timeout(night) and time.time() - MOT.get('chk', 0) > 20 \
+            and (not GW_MOT['val'] or time.time() - MOT.get('lt', MOT['t']) > bath_timeout(night) + 120):
+        # brak ruchu: gasimy, także gdy światło zapaliło się inaczej (klawisz, aplikacja).
+        # Zgubiona wiadomość „brak ruchu” z czujnika (24.11: świeciło kilkadziesiąt minut): po czasie + 2 min bez żadnej
+        # wiadomości o ruchu uznajemy, że ruchu nie ma, i następny ruch znów zapali światło.
+        if GW_MOT['val']:
+            GW_MOT['val'] = False
+            log('lazienka: czujnik nie zglosil konca ruchu, gasze po czasie')
         MOT['chk'] = time.time()
         lit = [x['ip'] for mac, x in ws_present().items() if room_of(mac) == 'bath' and x['p'].get('state')]
         if MOT['on'] or lit:
