@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.111'
+VERSION = '1.0.112'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -656,6 +656,16 @@ def wiz_scan_tick():
             if p_.get('sceneId') or abs((p_.get('temp') or 0) - k) >= 100 or abs((p_.get('dimming') or 0) - dim) >= 5:
                 WS['fix'][addr[0]] = t
                 ws_send(addr[0], {'temp': k, 'dimming': dim})
+        # strażnik: gdy mnie nie ma albo śpię, żadna żarówka nie ma prawa świecić (poza łazienką z czujnika w nocy).
+        # Działa przy każdej odpowiedzi żarówki, więc zgubione polecenie „zgaś” nie zostawi światła na cały dzień.
+        rm = room_of(x['mac'])
+        if x.get('state') and (state.get('away') or (state.get('asleep') and rm != 'bath' and not state.get('wl'))) \
+                and t - WS.setdefault('guard', {}).get(addr[0], 0) > 10:
+            WS['guard'][addr[0]] = t
+            ws_send(addr[0], {'state': False})
+            if t - WS.get('guard_log', 0) > 600:
+                WS['guard_log'] = t
+                log('straznik: %s %s swiecila mimo %s, gasze' % (rm or '?', x['mac'][-4:], 'wyjscia' if state.get('away') else 'nocy'))
         w = WS.get('want', {}).get(addr[0])
         if w:
             if t > w['until'] or bool(x.get('state')) == w['p']['state']:
@@ -776,8 +786,8 @@ def room_set(room, on, why=''):
     else:
         pr = {'state': False}
     for ip in ips:
-        # zapamiętany cel na 90 s: dopóki żarówka nie potwierdzi stanu, płytka ponawia polecenie
-        want[ip] = {'p': pr, 'until': time.time() + 90, 'at': time.time()}
+        # zapamiętany cel na 5 min: dopóki żarówka nie potwierdzi stanu, płytka ponawia polecenie
+        want[ip] = {'p': pr, 'until': time.time() + 300, 'at': time.time()}
         ws_send(ip, pr)
     if why:
         log('swiatla %s %s (%s, %d zarowek)' % (room, 'on' if on else 'off', why, len(ips)))
