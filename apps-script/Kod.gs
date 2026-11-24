@@ -942,13 +942,11 @@ function domLogCleanup_(lg) {
 // Skróty iOS: ?action=away&token=…&e=out (wyjście z promienia 1,5 km od domu) / e=in (powrót w ten promień).
 // Płytka przy synchronizacji dostaje ostatnie zdarzenie i uruchamia robota (raz dziennie, 7:00–21:00).
 function awayEvent_(ss, e) {
-  // Skróty iOS: out/in = rozłączenie/połączenie z domowym Wi-Fi, far/near = dalej niż 1,5 km / z powrotem blisko (robot)
-  e = String(e || '').toLowerCase(); if (['out', 'in', 'far', 'near'].indexOf(e) < 0) return { ok: false, error: 'e=out, in, far albo near' };
+  e = String(e || '').toLowerCase(); if (e !== 'out' && e !== 'in') return { ok: false, error: 'e=out albo e=in' };
   const t = Utilities.formatDate(new Date(), TZ, "yyyy-MM-dd'T'HH:mm:ss");
   PropertiesService.getScriptProperties().setProperty('AWAY_LAST', JSON.stringify({ e: e, t: t }));
-  const opis = { out: 'telefon: rozlaczony z domowym Wi-Fi', in: 'telefon: polaczony z domowym Wi-Fi', far: 'telefon: dalej niz 1,5 km od domu', near: 'telefon: z powrotem blisko domu' };
   const lg = ss.getSheetByName('Dom');
-  if (lg) lg.appendRow([new Date(), opis[e]]);
+  if (lg) lg.appendRow([new Date(), e === 'out' ? 'telefon: dalej niz 1,5 km od domu' : 'telefon: z powrotem blisko domu']);
   return { ok: true, e: e, t: t };
 }
 

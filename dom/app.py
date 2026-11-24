@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.118'
+VERSION = '1.0.119'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -423,7 +423,8 @@ def light_on(ip):
 def wiz_away(ip):
     """Nie ma mnie w domu: ostatnie zdarzenie ze Skrótu to wyjście i nie pali się żadne inne światło.
     (Gdy jestem w domu, zwykle coś świeci, więc to łapie też powrót, którego Skrót nie zapisał.)"""
-    if not state.get('away'):
+    aw = WZ.get('away')
+    if not aw or aw.get('e') != 'out':
         return False
     for other, st in WZ['st'].items():
         if other != ip and st:
@@ -2189,7 +2190,7 @@ def day_key():
 
 
 SAVE_KEYS = ('eve_ret', 'morn', 'night_walks', 'asleep', 'bed_off_at', 'bed_eve', 'night_on', 'bed_pause', 'air', 'wl', 'sleep_at', 'robot_ev', 'robot_day', 'wiz_lvl',
-             'cur_want', 'cur_why', 'cur_state', 'cur_day', 'boost_day', 'away_ev', 'away', 'away_pend',
+             'cur_want', 'cur_why', 'cur_state', 'cur_day', 'boost_day', 'away_ev', 'away',
              'rate_s', 'rate_b', 'heat_s', 'heat_b', 'ln_t', 'nl_seen', 'nl_eve', 'cozy')
 
 
@@ -2201,7 +2202,7 @@ def day_num():
 def robot_tick(sync, m):
     """Robot rusza raz na `robot_every` dni, gdy telefon zgłosi oddalenie od domu (> 1,5 km). Po powrocie wraca na stację."""
     aw = (sync or {}).get('away')
-    if not PLAN['robot'] or not aw or aw.get('e') != 'far' or not dev.get('robot'):
+    if not PLAN['robot'] or not aw or aw.get('e') != 'out' or not dev.get('robot'):
         return
     if state.get('robot_ev') == aw.get('t'):
         return  # to wyjście już obsłużone
@@ -2266,54 +2267,6 @@ def once(key):
     return True
 
 
-def away_change(asleep, m, weekend):
-    for n in list(BOOST):
-        boost_off(n)
-    if state['away']:
-        # dawna rutyna Google Home „Wyjście → Wszystko OFF” (+ lampa salon i lampka sypialnia, których tam brakowało)
-        log('wyjscie z domu: wszystko off, grzejniki %s' % PLAN['away_temp'])
-        for d in ('bed_hum', 'salon_hum', 'salon_pur'):
-            dev_set(d, 'on', False)
-        for key in ('lamp_salon', 'kitchen_led'):
-            if PLAN.get(key):
-                plug_set(PLAN[key], False, key + ' off')
-        if PLAN.get('wiz_bed'):
-            wiz({'state': False})
-        for r in ('work', 'bed', 'bath'):
-            room_set(r, False)
-        log('wyjscie: zarowki off')
-    elif not asleep:
-        # dawne rutyny „Powrót do domu Pon-Pt”, „DOM Weekend ON” i „Światło Wieczór”, bez ich okienek godzinowych
-        bed_ok = weekend or m >= 1080  # Pon-Pt sypialnia dopiero od 18:00
-        eve = (m >= max(1080, sun_min(False))) or m < 240  # wieczór = po zmierzchu, ale nie wcześniej niż 18:00
-        log('powrot do domu: salon on%s%s' % (', sypialnia on' if bed_ok else '', ', wieczor' if eve else ''))
-        hum_on('salon_hum', 's', None)
-        hum_on('salon_pur', 's', None)
-        if bed_ok:
-            hum_on('bed_hum', 'b', None)
-            state['bed_eve'] = day_key()
-        if eve:  # wieczorem: lampa za kanapą + salon i kuchnia klimatycznie (LED-y w kuchni za mocne: off)
-            state['eve_ret'] = day_key()
-            room_set('work', True, 'powrot wieczorem, klimatycznie')
-            room_set('bed', True, 'powrot wieczorem')  # sypialnia ciepło, przygaszona
-            if PLAN.get('lamp_salon'):
-                plug_set(PLAN['lamp_salon'], True, 'lamp_salon on')
-            if PLAN.get('kitchen_led'):
-                plug_set(PLAN['kitchen_led'], False, 'kitchen_led off (wieczor)')
-        else:
-            room_set('work', True, 'powrot w dzien')  # cały salon i kuchnia
-    if not state['away'] and dev.get('robot') and PLAN.get('robot_dock'):
-        # wracam: robot na stację, nawet jeśli nie skończył (dawne „Zadokuj Robota”)
-        try:
-            s_, a_ = PLAN['robot_dock']
-            dev['robot'].action(s_, a_)
-            log('robot: wrocilem, na stacje')
-        except Exception as e:
-            log('robot: blad dokowania %s' % e)
-    for name, room in (('salon', 's'), ('bed', 'b')):
-        trv_target(name, trv_plan(room))
-
-
 def tick_rules(sync, q):
     rh, pm25, t, co2 = q
     m = mins()
@@ -2363,45 +2316,65 @@ def tick_rules(sync, q):
     # --- po starcie płytki: nowe temperatury dzienne od razu (tylko gdy jestem w domu i nie śpię) ---
     if sync and not state.get('boot_temps'):
         state['boot_temps'] = 1
-        if not asleep and not state.get('away'):
+        aw = sync.get('away') or {}
+        if not asleep and aw.get('e') != 'out':
             if not air('s'):
                 trv_target('salon', trv_plan('s'))
             if not air('b') and trv_plan('b') == PLAN['bed_home']:
                 trv_target('bed', PLAN['bed_home'])
 
-    # --- wyjście / powrót ---
-    # Skróty iOS: e=out rozłączenie z domowym Wi-Fi (wyjście po 3 min, jeśli Wi-Fi nie wróci), e=in połączenie z domowym Wi-Fi
-    # (powrót od razu), e=far dalej niż 1,5 km (wyjście od razu + robot), e=near z powrotem blisko (tylko wpis).
+    # --- wyjście / powrót (Skrót iOS, promień 1,5 km): temperatury robi tylko płytka ---
     aw = (sync or {}).get('away') or {}
-    go = None
     if aw.get('t') and aw.get('t') != state.get('away_ev'):
         first = state.get('away_ev') is None
         state['away_ev'] = aw['t']
-        e = aw.get('e')
-        if first:
-            state['away'] = e in ('out', 'far')
-        elif e == 'out':
-            if asleep:
-                log('wifi: telefon rozlaczony w nocy, ignoruje')
-            elif not state.get('away'):
-                state['away_pend'] = time.time()
-                log('wifi: telefon rozlaczony, wyjscie za %d min, jesli nie wroci' % (PLAN.get('away_wait', 180) // 60))
-        elif e == 'in':
-            if state.get('away_pend'):
-                log('wifi: telefon wrocil do sieci, wyjscie odwolane')
-            state['away_pend'] = None
-            if state.get('away'):
-                go = 'in'
-        elif e == 'far':
-            state['away_pend'] = None
-            if not state.get('away'):
-                go = 'out'
-    if state.get('away_pend') and time.time() - state['away_pend'] >= PLAN.get('away_wait', 180):
-        state['away_pend'] = None
-        go = 'out'
-    if go:
-        state['away'] = go == 'out'
-        away_change(asleep, m, weekend)
+        state['away'] = aw.get('e') == 'out'
+        if not first:
+            for n in list(BOOST):
+                boost_off(n)
+            if state['away']:
+                # dawna rutyna Google Home „Wyjście → Wszystko OFF” (+ lampa salon i lampka sypialnia, których tam brakowało)
+                log('wyjscie z domu: wszystko off, grzejniki %s' % PLAN['away_temp'])
+                for d in ('bed_hum', 'salon_hum', 'salon_pur'):
+                    dev_set(d, 'on', False)
+                for key in ('lamp_salon', 'kitchen_led'):
+                    if PLAN.get(key):
+                        plug_set(PLAN[key], False, key + ' off')
+                if PLAN.get('wiz_bed'):
+                    wiz({'state': False})
+                for r in ('work', 'bed', 'bath'):
+                    room_set(r, False)
+                log('wyjscie: zarowki off')
+            elif not asleep:
+                # dawne rutyny „Powrót do domu Pon-Pt”, „DOM Weekend ON” i „Światło Wieczór”, bez ich okienek godzinowych
+                bed_ok = weekend or m >= 1080  # Pon-Pt sypialnia dopiero od 18:00
+                eve = (m >= max(1080, sun_min(False))) or m < 240  # wieczór = po zmierzchu, ale nie wcześniej niż 18:00
+                log('powrot do domu: salon on%s%s' % (', sypialnia on' if bed_ok else '', ', wieczor' if eve else ''))
+                hum_on('salon_hum', 's', None)
+                hum_on('salon_pur', 's', None)
+                if bed_ok:
+                    hum_on('bed_hum', 'b', None)
+                    state['bed_eve'] = day_key()
+                if eve:  # wieczorem: lampa za kanapą + salon i kuchnia klimatycznie (LED-y w kuchni za mocne: off)
+                    state['eve_ret'] = day_key()
+                    room_set('work', True, 'powrot wieczorem, klimatycznie')
+                    room_set('bed', True, 'powrot wieczorem')  # sypialnia ciepło, przygaszona
+                    if PLAN.get('lamp_salon'):
+                        plug_set(PLAN['lamp_salon'], True, 'lamp_salon on')
+                    if PLAN.get('kitchen_led'):
+                        plug_set(PLAN['kitchen_led'], False, 'kitchen_led off (wieczor)')
+                else:
+                    room_set('work', True, 'powrot w dzien')  # cały salon i kuchnia
+            if not state['away'] and dev.get('robot') and PLAN.get('robot_dock'):
+                # wracam: robot na stację, nawet jeśli nie skończył (dawne „Zadokuj Robota”)
+                try:
+                    s_, a_ = PLAN['robot_dock']
+                    dev['robot'].action(s_, a_)
+                    log('robot: wrocilem, na stacje')
+                except Exception as e:
+                    log('robot: blad dokowania %s' % e)
+            for name, room in (('salon', 's'), ('bed', 'b')):
+                trv_target(name, trv_plan(room))
 
     # --- robot: wyszedłem dalej niż 1,5 km od domu ---
     robot_tick(sync, m)
