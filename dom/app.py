@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.109'
+VERSION = '1.0.110'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -1400,6 +1400,46 @@ def mot_set(v, why):
     GW_MOT['val'] = v
 
 
+def http_tick():
+    """Mały serwer w domowej sieci (port 8089), bez blokowania pętli:
+    /teraz      - Skrót z iPhone'a (ładowarka ON/OFF): od razu synchronizacja z arkuszem i reguły
+    /ruch?v=1|0 - bramka Shelly: ruch w łazience"""
+    if GW_MOT['srv'] is None:
+        try:
+            import socket
+            srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            srv.bind(('0.0.0.0', MOT_PORT))
+            srv.listen(2)
+            srv.setblocking(False)
+            GW_MOT['srv'] = srv
+        except Exception as e:
+            GW_MOT['srv'] = False
+            log('nasluch 8089 niedostepny (%s)' % e)
+    if not GW_MOT['srv']:
+        return
+    for _ in range(3):
+        try:
+            c, _a = GW_MOT['srv'].accept()
+        except Exception:
+            break
+        try:
+            c.settimeout(1)
+            req = c.recv(256)
+            c.send(b'HTTP/1.0 200 OK\r\nContent-Length: 2\r\n\r\nok')
+            if b'/ruch?v=1' in req:
+                mot_set(True, 'bramka')
+            elif b'/ruch?v=0' in req:
+                mot_set(False, 'bramka')
+            elif b'/teraz' in req:
+                NOW[0] = True  # telefon: zdarzenie już w arkuszu, płytka od razu je odczytuje
+                print('teraz: synchronizacja na zadanie telefonu')
+        except Exception as e:
+            print('http req', e)
+        finally:
+            c.close()
+
+
 def gw_motion():
     """Czujnik ruchu w łazience przez bramkę Shelly (płytka z salonu go nie słyszy, bramka tak).
     Bramka sama wysyła płytce wiadomość przy każdej zmianie (skrypt w bramce), płytka tylko nasłuchuje;
@@ -1429,37 +1469,6 @@ def gw_motion():
         except Exception as e:
             log('bramka: blad szukania czujnika ruchu (%s)' % e)
         return
-    # nasłuch wiadomości od bramki (bez blokowania pętli)
-    if GW_MOT['srv'] is None:
-        try:
-            import socket
-            srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            srv.bind(('0.0.0.0', MOT_PORT))
-            srv.listen(2)
-            srv.setblocking(False)
-            GW_MOT['srv'] = srv
-        except Exception as e:
-            GW_MOT['srv'] = False
-            log('lazienka: nasluch niedostepny (%s)' % e)
-    if GW_MOT['srv']:
-        for _ in range(3):
-            try:
-                c, _a = GW_MOT['srv'].accept()
-            except Exception:
-                break
-            try:
-                c.settimeout(1)
-                req = c.recv(256)
-                c.send(b'HTTP/1.0 200 OK\r\nContent-Length: 2\r\n\r\nok')
-                if b'/ruch?v=1' in req:
-                    mot_set(True, 'bramka')
-                elif b'/ruch?v=0' in req:
-                    mot_set(False, 'bramka')
-            except Exception as e:
-                print('ruch req', e)
-            finally:
-                c.close()
     if not GW_MOT['inst'] and now - GW_MOT.get('inst_at', 0) > 600:
         GW_MOT['inst_at'] = now
         try:
@@ -2486,6 +2495,7 @@ def run():
             curtains_tick()
             night_lamp_guard()
             wiz_scan_tick()
+            http_tick()
             gw_motion()
             bath_tick()
             wiz_switch_tick(sync)
