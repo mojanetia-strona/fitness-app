@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.116'
+VERSION = '1.0.117'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -943,11 +943,26 @@ def nl_mode():
 def _nl_packet(data, ip):
     ids = PLAN.get('nl_ids') or []
     gid = None
-    if len(data) > 28:
+    try:
+        import cryptolib
+    except ImportError:
+        import ucryptolib as cryptolib
+    v35 = data[:4] == b'\x00\x00\x66\x99'
+    if v35 and len(data) > 50:
+        # Tuya 3.5 (prefiks 6699): AES-GCM; tag pomijamy, odszyfrowanie licznikiem (CTR) na zwykłym AES
         try:
-            import cryptolib
-        except ImportError:
-            import ucryptolib as cryptolib
+            n = int.from_bytes(data[14:18], 'big')
+            b = data[18:18 + n]
+            iv, ct = b[:12], b[12:-16]
+            aes = cryptolib.aes(_NL_KEY, 1)
+            out = bytearray()
+            for i in range(0, len(ct), 16):
+                ks = aes.encrypt(iv + (i // 16 + 2).to_bytes(4, 'big'))
+                out += bytes(x ^ y for x, y in zip(ct[i:i + 16], ks))
+            gid = json.loads(out[out.find(b'{'):out.rfind(b'}') + 1]).get('gwId')
+        except Exception as e:
+            print('nl 3.5', e)
+    elif len(data) > 28:
         for start in (20, 24):
             body = data[start:-8]
             if not body or len(body) % 16:
@@ -977,9 +992,14 @@ def _nl_packet(data, ip):
             except Exception:
                 pass
         NL['seen'][ip] = time.time()
+    elif gid is None and v35 and ip not in NL['ips'].values() and len(set(NL['ips'].values())) < len(ids):
+        # nie dało się odczytać, a w domu nie ma innych urządzeń Tuya: to żarówka z lampki
+        NL['ips']['ip' + ip] = ip
+        NL['seen'][ip] = time.time()
+        log('lampka nocna: zarowka pod %s (bez odczytu identyfikatora)' % ip)
     elif gid is None and time.time() - NL['learn_log'] > 3600:
         NL['learn_log'] = time.time()
-        log('lampka nocna: nieznane rozgloszenie z %s (%d B)' % (ip, len(data)))
+        log('lampka nocna: nieznane rozgloszenie z %s (%d B, %s)' % (ip, len(data), data[:4]))
 
 
 def nl_tick():
