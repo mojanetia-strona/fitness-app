@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.112'
+VERSION = '1.0.113'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -668,10 +668,18 @@ def wiz_scan_tick():
                 log('straznik: %s %s swiecila mimo %s, gasze' % (rm or '?', x['mac'][-4:], 'wyjscia' if state.get('away') else 'nocy'))
         w = WS.get('want', {}).get(addr[0])
         if w:
-            if t > w['until'] or bool(x.get('state')) == w['p']['state']:
-                WS['want'].pop(addr[0], None)  # potwierdzone (albo minął czas)
+            c = w.get('cmd')
+            if bool(x.get('state')) == w['p']['state']:
+                WS['want'].pop(addr[0], None)  # potwierdzone
+                if c and addr[0] in c['left']:
+                    c['left'].discard(addr[0])
+                    c['done'][addr[0]] = t - c['t0']
+            elif t > w['until']:
+                WS['want'].pop(addr[0], None)
             elif t - w['at'] > 1.5:
                 w['at'] = t
+                if c:
+                    c['rs'] += 1
                 ws_send(addr[0], w['p'])  # żarówka nie wykonała polecenia: ponawiamy
         st = WS.setdefault('st', {}).setdefault(addr[0], [0, 0, 0, 0])  # zapytania, odpowiedzi, suma rssi, liczba rssi
         st[1] += 1
@@ -739,6 +747,19 @@ def wiz_scan_tick():
                 out.append('%s %s %s%% %s' % (names.get(room_of(mac), '?'), mac[-4:], min(100, r * 100 // q), ('%ddBm' % (rs // rn)) if rn else '?'))
         WS['st'] = {}
         log('wifi zarowek (odpowiedzi, sygnal): ' + ' | '.join(out))
+    for c in list(WS.get('cmds', [])):  # statystyka poleceń: ile żarówek, w jakim czasie, ile ponowień
+        if not c['left'] or t - c['t0'] > 300:
+            WS['cmds'].remove(c)
+            d = sorted(c['done'].values())
+            st = WS.setdefault('cmd_stat', {'n': 0, 'bulbs': 0, 'ok': 0, 'rs': 0, 'slow': 0})
+            st['n'] += 1
+            st['bulbs'] += c['n']
+            st['ok'] += len(d)
+            st['rs'] += c['rs']
+            st['slow'] += sum(1 for v in d if v > 3)
+            log('polecenie %s %s: %d/%d potwierdzone, najwolniej %.1f s, ponowien %d%s' % (
+                c['room'], 'on' if c['on'] else 'off', len(d), c['n'], d[-1] if d else 0, c['rs'],
+                '' if not c['left'] else ', BRAK: ' + ' '.join('.' + i.split('.')[-1] for i in c['left'])))
     pres = ws_present()
     if not WS['inv']:
         WS['inv'] = True
@@ -785,9 +806,11 @@ def room_set(room, on, why=''):
         pr = {'state': True, 'temp': k, 'dimming': dim}
     else:
         pr = {'state': False}
+    cmd = {'room': room, 'on': on, 't0': time.time(), 'left': set(ips), 'n': len(ips), 'rs': 0, 'done': {}}
+    WS.setdefault('cmds', []).append(cmd)
     for ip in ips:
         # zapamiętany cel na 5 min: dopóki żarówka nie potwierdzi stanu, płytka ponawia polecenie
-        want[ip] = {'p': pr, 'until': time.time() + 300, 'at': time.time()}
+        want[ip] = {'p': pr, 'until': time.time() + 300, 'at': time.time(), 'cmd': cmd}
         ws_send(ip, pr)
     if why:
         log('swiatla %s %s (%s, %d zarowek)' % (room, 'on' if on else 'off', why, len(ips)))
