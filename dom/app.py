@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.107'
+VERSION = '1.0.108'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -2444,8 +2444,16 @@ def run():
         try:
             force = NOW[0]
             NOW[0] = False
-            # co 2 min; rano (4:00-11:00), dopóki śpię: co 20 s, żeby pobudka (zdjęcie telefonu) działała od razu
-            every = 20 if state.get('asleep') and 240 <= mins() < 660 else 120
+            # co 2 min; w oknie typowej pobudki (od 1 h przed do 2 h po, np. 6:00-9:00 przy pobudce o 7:00),
+            # dopóki śpię: co 20 s, żeby poranek ruszał od razu po zdjęciu telefonu
+            every = 120
+            if state.get('asleep'):
+                try:
+                    wm = wake_min(sync, is_weekend())
+                    if wm - 60 <= mins() < wm + 120:
+                        every = 20
+                except Exception:
+                    pass
             if force or time.time() - last_sync >= every:
                 last_sync = time.time()
                 try:
