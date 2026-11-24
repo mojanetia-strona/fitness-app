@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.106'
+VERSION = '1.0.107'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -1423,7 +1423,9 @@ def gw_motion():
                 off += len(comps)
                 if not comps or off >= res.get('total', 0):
                     break
-            log('bramka: czujnik ruchu lazienka %s' % ('id %s' % GW_MOT['id'] if GW_MOT['id'] is not None else 'nie znaleziony'))
+            if GW_MOT['id'] is not None or not GW_MOT.get('nf_log'):
+                GW_MOT['nf_log'] = True  # „nie znaleziony” tylko raz po starcie
+                log('bramka: czujnik ruchu lazienka %s' % ('id %s' % GW_MOT['id'] if GW_MOT['id'] is not None else 'nie znaleziony'))
         except Exception as e:
             log('bramka: blad szukania czujnika ruchu (%s)' % e)
         return
@@ -2442,7 +2444,9 @@ def run():
         try:
             force = NOW[0]
             NOW[0] = False
-            if force or time.time() - last_sync >= 120:  # co 2 min; pobudka z wagi i tak synchronizuje od razu (force)
+            # co 2 min; rano (4:00-11:00), dopóki śpię: co 20 s, żeby pobudka (zdjęcie telefonu) działała od razu
+            every = 20 if state.get('asleep') and 240 <= mins() < 660 else 120
+            if force or time.time() - last_sync >= every:
                 last_sync = time.time()
                 try:
                     sync = gas({'pc': 'on'} if PC['evt'] else {})
