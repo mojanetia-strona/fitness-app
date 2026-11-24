@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.121'
+VERSION = '1.0.122'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -2220,7 +2220,13 @@ def robot_tick(sync, m):
     if age > PLAN['robot_fresh']:
         state['robot_ev'] = aw['t']
         return
-    if age < PLAN.get('robot_after', 30):
+    gym = False
+    try:
+        g = (sync or {}).get('gym')
+        gym = bool(g) and local_minutes_since(g['t']) <= age  # wejście na siłownię po tym wyjściu: rusza od razu
+    except Exception:
+        pass
+    if age < PLAN.get('robot_after', 30) and not gym:
         return  # jeszcze czekamy: krótkie wyjście (Żabka, paczkomat) robota nie uruchamia
     if not (PLAN['robot_from'] <= m < PLAN['robot_to']):
         return  # poczekamy do pory dziennej, dopóki zdarzenie jest świeże
@@ -2233,7 +2239,7 @@ def robot_tick(sync, m):
     try:
         dev['robot'].action(s, a)
         state['robot_day'] = day_num()
-        log('robot: wyszedlem z domu, start sprzatania')
+        log('robot: %s, start sprzatania' % ('silownia' if gym else 'nie ma mnie od %d min' % age))
     except Exception as e:
         log('robot: blad startu %s' % e)
 

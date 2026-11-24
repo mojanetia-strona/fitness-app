@@ -990,6 +990,8 @@ function espSync_(ss, p) {
   try { out.alarms = JSON.parse(PropertiesService.getScriptProperties().getProperty('ALARMS_NEXT') || '[]').map(a => a.t); } catch (e) { out.alarms = []; }
   // ostatnie oddalenie od domu / powrót (robot sprzątający)
   try { const aw = PropertiesService.getScriptProperties().getProperty('AWAY_LAST'); if (aw) out.away = JSON.parse(aw); } catch (e) { }
+  // ostatnie wejście na siłownię (robot rusza od razu, bez czekania 30 min)
+  try { const g = gymRecent_(ss).filter(x => x.e === 'in').pop(); if (g) out.gym = { t: Utilities.formatDate(new Date(g.t), TZ, "yyyy-MM-dd'T'HH:mm:ss") }; } catch (e) { }
   // jednorazowe polecenie dla płytki (np. z funkcji testBudzenia), oddawane przy najbliższej synchronizacji
   const pr = PropertiesService.getScriptProperties(), cmd = pr.getProperty('ESP_CMD');
   if (cmd) { out.cmd = cmd; pr.deleteProperty('ESP_CMD'); }
