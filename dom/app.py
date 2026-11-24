@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.124'
+VERSION = '1.0.125'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -876,7 +876,7 @@ def bath_tick():
             log('lazienka TEST %02d:%02d:%02d: ruch z %s, zarowki %s, %s' % (
                 tm[3], tm[4], tm[5], MOT.get('src', '?'), ' '.join('.' + i.split('.')[-1] for i in use),
                 'wszystkie potwierdzily' if not bad else 'NIE potwierdzily: .' + ',.'.join(bad)))
-        if night:
+        if night or nl_eve_on():
             for ip in ips[1:]:
                 ws_send(ip, {'state': False})
         if not MOT['on']:
@@ -1152,7 +1152,18 @@ def nl_event(on):
             else:
                 wiz({'state': False})
         if state.get('cur_state') != 'close':
-            curtains('close', 'lampka nocna')
+            curtains('close', 'lampka nocna', quiet=False)
+        # salon cicho już w trybie czytania (jak w nocy)
+        dev_set('salon_hum', 'sh_mode', 1, 'salon nawilzacz tryb nocny (czytanie)')
+        dev_set('salon_pur', 'sp_mode', 3, 'salon oczyszczacz tryb nocny (czytanie)')
+        # łazienka od razu nocna: jeśli świeci, zostaje jedna żarówka 2700 K 15%
+        bips = sorted(room_ips('bath'))
+        lit = [x['ip'] for mac, x in ws_present().items() if room_of(mac) == 'bath' and x['p'].get('state')]
+        if bips and (lit or MOT.get('on')):
+            ws_send(bips[0], {'state': True, 'temp': 2700, 'dimming': 15})
+            for ip in bips[1:]:
+                ws_send(ip, {'state': False})
+            log('lazienka: tryb nocny (jedna zarowka)')
         return
     # zgaszona 21:00-4:00 = idę spać
     state['ln_t'] = time.time()
@@ -2537,7 +2548,7 @@ def tick_rules(sync, q):
                 room_set(r, True, 'wieczor')
 
     # --- salon: moc nawilżacza według Qingpinga ---
-    if rh is not None and not air('s') and not asleep:  # w nocy nie ruszamy trybu nocnego
+    if rh is not None and not air('s') and not asleep and not nl_eve_on():  # w nocy i w trybie czytania nie ruszamy trybu nocnego
         on, mode = dev_get('salon_hum', ['on', 'sh_mode'])
         if on:
             if rh < PLAN['rh_low'] and mode != 2:
@@ -2547,7 +2558,7 @@ def tick_rules(sync, q):
                     dev_set('salon_hum', 'sh_target', PLAN['rh_target'])
 
     # --- salon: bieg oczyszczacza według PM2.5 z Qingpinga (jak nawilżacz według wilgotności) ---
-    if not air('s') and not asleep:
+    if not air('s') and not asleep and not nl_eve_on():
         p_on, p_mode, p_fan = dev_get('salon_pur', ['on', 'sp_mode', 'sp_fan'])
         if p_on and pm25 is None and p_mode == 6:
             dev_set('salon_pur', 'sp_mode', 0, 'qingping milczy: salon oczyszczacz na auto (wlasny czujnik)')
