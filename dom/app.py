@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.113'
+VERSION = '1.0.114'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -61,6 +61,9 @@ PLAN = {
     'kitchen_led': '192.168.100.39',  # moduł Shelly 1PM Mini „LED pod szafkami” w kuchni: włącza Google Home, płytka gasi na noc
     # --- budzenie światłem: żarówka WiZ „Lampka Sypialnia” (lokalnie, UDP 38899) ---
     'wiz_bed': '192.168.100.37',
+    'night_lamp': True,     # lampka nocna (2× Osram SMART+ WiFi G9 na czarnym klawiszu): zgaszona 21:00-4:00 = noc
+    'nl_ids': ['bf295d5589d3b6f19d1lqn', 'bfe41dd92e344b2ac8jpuh'],
+    'nl_off_s': 10,         # tyle sekund obie żarówki muszą milczeć, żeby uznać lampkę za zgaszoną
     # --- klawisz jak zwykły włącznik: żarówka WiZ ma WiZclick z trybem 1 = „Wył.”, więc po podaniu prądu zostaje zgaszona
     # (mignięcie prądu w nocy niczego nie zapala); poza nocą płytka zapala ją od razu po powrocie do sieci ---
     'wiz_switch': True,
@@ -146,8 +149,8 @@ def log(msg):
 
 
 # ---------- Apps Script ----------
-def gas(params, want=True):
-    url = cfg['gas_url'] + '?action=esp&token=' + cfg['gas_token']
+def gas(params, want=True, action='esp'):
+    url = cfg['gas_url'] + '?action=' + action + '&token=' + cfg['gas_token']
     for k in params:
         v = str(params[k])
         enc = ''
@@ -918,6 +921,185 @@ def fb_process():
         return
     for ip in ips:
         wiz_power_on(ip, 'firstBeat')
+
+
+# ---------- lampka nocna (Osram SMART+ WiFi G9, Tuya) ----------
+# Klawisz jest sygnałem: żarówki dostają prąd (lampka ON) albo znikają z sieci (OFF).
+# Płytka słucha ich rozgłoszeń (UDP 6666/6667, w nich identyfikator i IP) i co 2 s puka na port 6668.
+NL = {'socks': None, 'ips': {}, 'seen': {}, 'probe': {}, 'probe_at': 0, 'on': None, 'off_since': 0, 'learn_log': 0}
+_NL_KEY = b'l\x1e\xc8\xe2\xbb\x9b\xb5\x9a\xb5\x0b\r\xafd\x9bA\n'  # md5("yGAdlopoPVldABfn"): stały klucz rozgłoszeń Tuya
+
+
+def nl_mode():
+    return bool(PLAN.get('night_lamp')) and time.time() - (state.get('nl_seen') or 0) < 3 * 86400
+
+
+def _nl_packet(data, ip):
+    ids = PLAN.get('nl_ids') or []
+    gid = None
+    if len(data) > 28:
+        try:
+            import cryptolib
+        except ImportError:
+            import ucryptolib as cryptolib
+        for start in (20, 24):
+            body = data[start:-8]
+            if not body or len(body) % 16:
+                continue
+            try:
+                raw = cryptolib.aes(_NL_KEY, 1).decrypt(body)
+                raw = raw[:len(raw) - raw[-1]] if 0 < raw[-1] <= 16 else raw
+                j = json.loads(raw)
+                gid = j.get('gwId')
+                break
+            except Exception:
+                pass
+        if gid is None:
+            try:  # stare żarówki rozgłaszają jawnym tekstem
+                i = data.find(b'{')
+                j = json.loads(data[i:data.rfind(b'}') + 1])
+                gid = j.get('gwId')
+            except Exception:
+                pass
+    if gid in ids:
+        if NL['ips'].get(gid) != ip:
+            NL['ips'][gid] = ip
+            log('lampka nocna: zarowka %s pod %s' % (gid[-4:], ip))
+            try:
+                with open('nl.json', 'w') as f:
+                    json.dump(NL['ips'], f)
+            except Exception:
+                pass
+        NL['seen'][ip] = time.time()
+    elif gid is None and time.time() - NL['learn_log'] > 3600:
+        NL['learn_log'] = time.time()
+        log('lampka nocna: nieznane rozgloszenie z %s (%d B)' % (ip, len(data)))
+
+
+def nl_tick():
+    if not PLAN.get('night_lamp'):
+        return
+    import socket
+    now = time.time()
+    if NL['socks'] is None:
+        NL['socks'] = []
+        for port in (6666, 6667):
+            try:
+                u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                u.bind(('0.0.0.0', port))
+                u.setblocking(False)
+                NL['socks'].append(u)
+            except Exception as e:
+                log('lampka nocna: port %d niedostepny (%s)' % (port, e))
+        try:
+            with open('nl.json') as f:
+                NL['ips'].update(json.load(f))
+        except Exception:
+            pass
+        for ip in (PLAN.get('nl_ips') or []):
+            NL['ips'].setdefault('cfg' + ip, ip)
+    for u in NL['socks']:
+        for _ in range(6):
+            try:
+                data, addr = u.recvfrom(1024)
+            except Exception:
+                break
+            _nl_packet(data, addr[0])
+    # pukanie na port 6668 (bez blokowania pętli): połączenie przyjęte = żarówka ma prąd
+    import select
+    for ip in list(NL['probe']):
+        c, t0 = NL['probe'][ip]
+        ev = 0
+        try:
+            p = select.poll()
+            p.register(c, select.POLLOUT | select.POLLERR | select.POLLHUP)
+            r = p.poll(0)
+            ev = r[0][1] if r else 0
+        except Exception:
+            ev = select.POLLERR
+        if ev & (select.POLLERR | select.POLLHUP) or (not ev and now - t0 > 2):
+            done = True
+        elif ev & select.POLLOUT:
+            NL['seen'][ip] = now
+            done = True
+        else:
+            done = False
+        if done:
+            try:
+                c.close()
+            except Exception:
+                pass
+            del NL['probe'][ip]
+    if now - NL['probe_at'] >= 2:
+        NL['probe_at'] = now
+        for ip in set(NL['ips'].values()):
+            if ip in NL['probe']:
+                continue
+            try:
+                c = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                c.setblocking(False)
+                try:
+                    c.connect(socket.getaddrinfo(ip, 6668)[0][-1])
+                except OSError:
+                    pass  # EINPROGRESS: wynik sprawdzi poll w kolejnym obiegu
+                NL['probe'][ip] = (c, now)
+            except Exception as e:
+                print('nl probe', e)
+    if not NL['ips'] or now - BOOT_T[0] < 20:
+        return
+    alive = any(now - t < 5 for t in NL['seen'].values())
+    if alive:
+        state['nl_seen'] = now
+        NL['off_since'] = 0
+        if NL['on'] is not True:
+            prev = NL['on']
+            NL['on'] = True
+            if prev is not None:
+                nl_event(True)
+            else:
+                print('lampka nocna: start, swieci')
+    else:
+        if not NL['off_since']:
+            NL['off_since'] = now
+        if NL['on'] is not False and now - NL['off_since'] >= PLAN.get('nl_off_s', 10):
+            prev = NL['on']
+            NL['on'] = False
+            if prev is not None:
+                nl_event(False)
+            else:
+                print('lampka nocna: start, zgaszona')
+
+
+def nl_event(on):
+    m = mins()
+    night = m >= PLAN['night_from'] or m < 240
+    if not night:
+        log('lampka nocna %s (dzien, nic nie robie)' % ('on' if on else 'off'))
+        return
+    if state.get('away'):
+        log('lampka nocna %s, ale mnie nie ma: nic' % ('on' if on else 'off'))
+        return
+    if state.get('asleep'):
+        log('lampka nocna %s w nocy (juz spie, nic)' % ('on' if on else 'off'))
+        return
+    if on:
+        # lampka po 21:00: wszystko gaśnie poza lampą za kanapą
+        log('lampka nocna on: gasze wszystko poza lampa salon')
+        for r in ('work', 'bed'):
+            room_set(r, False, 'lampka nocna')
+        if PLAN.get('kitchen_led'):
+            plug_set(PLAN['kitchen_led'], False, 'kuchnia led off')
+        if PLAN.get('wiz_bed'):
+            wiz({'state': False})
+        return
+    # zgaszona 21:00-4:00 = idę spać
+    state['ln_t'] = time.time()
+    log('lampka nocna off: noc')
+    NOW[0] = True
+    try:
+        gas({'e': 'down'}, False, 'phone')  # wpis „odłożony” w Telefon: od niego liczy się sen
+    except Exception as e:
+        log('lampka nocna: blad zapisu do arkusza %s' % e)
 
 
 def night_lamp_guard():
@@ -1960,7 +2142,7 @@ def day_key():
 
 SAVE_KEYS = ('eve_ret', 'morn', 'night_walks', 'asleep', 'bed_off_at', 'bed_eve', 'night_on', 'bed_pause', 'air', 'wl', 'sleep_at', 'robot_ev', 'robot_day', 'wiz_lvl',
              'cur_want', 'cur_why', 'cur_state', 'cur_day', 'boost_day', 'away_ev', 'away',
-             'rate_s', 'rate_b', 'heat_s', 'heat_b')
+             'rate_s', 'rate_b', 'heat_s', 'heat_b', 'ln_t', 'nl_seen')
 
 
 def day_num():
@@ -2064,6 +2246,22 @@ def tick_rules(sync, q):
             print('wake check', e)
     if was and not asleep and m < 240:
         asleep = True  # zerknięcie na telefon w nocy to jeszcze nie pobudka
+    lt = state.get('ln_t')
+    ln = bool(lt) and time.time() - lt < 12 * 3600
+    if nl_mode():
+        if not was:
+            if ln:
+                asleep = True  # lampka nocna zgaszona po 21:00
+            elif asleep and not (60 <= m < 240):
+                asleep = False  # sam telefon na ładowarce nie usypia domu; zapas: od 1:00
+        elif ln and not asleep:
+            # noc z lampki kończy dopiero zdjęcie telefonu (albo waga) po jej zgaszeniu
+            try:
+                up_after = ph and ph.get('e') == 'up' and local_minutes_since(ph['t']) * 60 < time.time() - lt - 30
+            except Exception:
+                up_after = False
+            if not up_after:
+                asleep = True
     state['asleep'] = asleep
 
     # --- po starcie płytki: nowe temperatury dzienne od razu (tylko gdy jestem w domu i nie śpię) ---
@@ -2141,8 +2339,12 @@ def tick_rules(sync, q):
             room_set(r, False)
         MOT['on'] = False
         try:
-            _, _, _, h, mi = parse_iso(ph['t'])
-            state['sleep_at'] = h * 60 + mi  # pora odłożenia telefonu: od niej liczymy 8 h snu
+            if ln:
+                state['sleep_at'] = mins()  # noc z lampki: od zgaszenia liczymy 8 h snu
+                log('noc: lampka nocna zgaszona')
+            else:
+                _, _, _, h, mi = parse_iso(ph['t'])
+                state['sleep_at'] = h * 60 + mi  # pora odłożenia telefonu: od niej liczymy 8 h snu
         except Exception:
             state['sleep_at'] = mins()
         dev_set('bed_hum', 'on', False, 'sypialnia nawilzacz off')
@@ -2204,6 +2406,7 @@ def tick_rules(sync, q):
     # --- wstałem: telefon zdjęty rano ---
     if was and not asleep and ph and ph.get('e') == 'up':
         log('rano: telefon zdjety')
+        state['ln_t'] = None
         state['morn'] = {'t0': time.time(), 'we': is_weekend()}
         room_set('bed', False, 'wstalem')  # sufit w sypialni gaśnie (wychodzę z sypialni)
         state['night_walks'] = 0
@@ -2560,6 +2763,7 @@ def run():
             win_tick()
             curtains_tick()
             night_lamp_guard()
+            nl_tick()
             wiz_scan_tick()
             http_tick()
             gw_motion()
