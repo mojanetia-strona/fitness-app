@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.119'
+VERSION = '1.0.120'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -81,7 +81,8 @@ PLAN = {
     'robot_from': 420,      # najwcześniej 7:00
     'robot_to': 1260,       # najpóźniej start do 21:00
     'robot_every': 1,       # co ile dni (1 = codziennie, 2 = co drugi dzień)
-    'robot_fresh': 45,      # zdarzenie „oddaliłem się” ważne tyle minut (np. wyjście o 6:50 uruchomi robota o 7:00)
+    'robot_after': 30,      # robot rusza tyle minut po wyjściu z domu, jeśli nie wróciłem (Żabka, paczkomat: nie)
+    'robot_fresh': 150,     # wyjście ważne tyle minut (np. wyjście o 6:50 uruchomi robota o 7:00)
     'robot_dock': [2, 3],   # MIoT xiaomi.vacuum.ov42gl: stop-and-gocharge (przerywa sprzątanie i wraca na stację)
     'robot_start': [2, 1],  # MIoT: usługa vacuum, akcja start-sweep (tryb taki, jak ustawiony w Xiaomi Home)
     # --- zasłony w sypialni: 2× SwitchBot Curtain 3 Rod (Bluetooth, bez huba) ---
@@ -2200,7 +2201,7 @@ def day_num():
 
 
 def robot_tick(sync, m):
-    """Robot rusza raz na `robot_every` dni, gdy telefon zgłosi oddalenie od domu (> 1,5 km). Po powrocie wraca na stację."""
+    """Robot rusza raz na `robot_every` dni, 30 min po wyjściu z domu, jeśli w tym czasie nie wróciłem. Po powrocie wraca na stację."""
     aw = (sync or {}).get('away')
     if not PLAN['robot'] or not aw or aw.get('e') != 'out' or not dev.get('robot'):
         return
@@ -2213,6 +2214,8 @@ def robot_tick(sync, m):
     if age > PLAN['robot_fresh']:
         state['robot_ev'] = aw['t']
         return
+    if age < PLAN.get('robot_after', 30):
+        return  # jeszcze czekamy: krótkie wyjście (Żabka, paczkomat) robota nie uruchamia
     if not (PLAN['robot_from'] <= m < PLAN['robot_to']):
         return  # poczekamy do pory dziennej, dopóki zdarzenie jest świeże
     state['robot_ev'] = aw['t']
@@ -2323,13 +2326,20 @@ def tick_rules(sync, q):
             if not air('b') and trv_plan('b') == PLAN['bed_home']:
                 trv_target('bed', PLAN['bed_home'])
 
-    # --- wyjście / powrót (Skrót iOS, promień 1,5 km): temperatury robi tylko płytka ---
+    # --- wyjście / powrót (Skróty iOS): wyjście = rozłączenie z domowym Wi-Fi; powrót = lokalizacja albo połączenie z Wi-Fi ---
     aw = (sync or {}).get('away') or {}
     if aw.get('t') and aw.get('t') != state.get('away_ev'):
         first = state.get('away_ev') is None
         state['away_ev'] = aw['t']
-        state['away'] = aw.get('e') == 'out'
-        if not first:
+        prev = bool(state.get('away'))
+        new = aw.get('e') == 'out'
+        if new and asleep and not first:
+            new = prev
+            log('wyjscie w nocy (telefon zgubil wifi?), ignoruje')
+        state['away'] = new
+        if not first and new == prev:
+            pass  # drugi powrót (lokalizacja + Wi-Fi) albo powtórzone wyjście: nic nowego
+        elif not first:
             for n in list(BOOST):
                 boost_off(n)
             if state['away']:
