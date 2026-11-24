@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.115'
+VERSION = '1.0.116'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -576,7 +576,7 @@ def light_target(room='work', m=None):
     ss = sun_min(False)
     dark = m >= ss or m < 240  # po zachodzie słońca (zmierzch) do 4:00
     if room == 'bath':
-        if state.get('asleep'):
+        if state.get('asleep') or nl_eve_on():
             return 2700, 15        # noc: jedna żarówka, ciemno i ciepło
         if morning_on():
             return 6000, 100       # rano: białe, jasne, rozbudza
@@ -860,7 +860,7 @@ def bath_tick():
             MOT['rs_at'] = time.time()
             MOT['rs_log'] = False
         k, dim = light_target('bath')
-        use = ips[:1] if night else ips
+        use = ips[:1] if (night or nl_eve_on()) else ips
         bad = []
         for ip in use:  # z potwierdzeniem od żarówki (do 3 prób), nie „wyślij i zapomnij”
             if wiz({'state': True, 'temp': k, 'dimming': dim}, 'setPilot', ip) is None:
@@ -930,6 +930,12 @@ NL = {'socks': None, 'ips': {}, 'seen': {}, 'probe': {}, 'probe_at': 0, 'on': No
 _NL_KEY = b'l\x1e\xc8\xe2\xbb\x9b\xb5\x9a\xb5\x0b\r\xafd\x9bA\n'  # md5("yGAdlopoPVldABfn"): stały klucz rozgłoszeń Tuya
 
 
+def nl_eve_on():
+    # lampka nocna zapalona po 21:00, jeszcze przed nocą: łazienka już w trybie nocnym
+    t = state.get('nl_eve')
+    return bool(t) and time.time() - t < 8 * 3600
+
+
 def nl_mode():
     return bool(PLAN.get('night_lamp')) and time.time() - (state.get('nl_seen') or 0) < 3 * 86400
 
@@ -979,6 +985,11 @@ def _nl_packet(data, ip):
 def nl_tick():
     if not PLAN.get('night_lamp'):
         return
+    if state.get('cozy') and (mins() >= 1320 or mins() < 240 or state.get('asleep')):
+        state['cozy'] = None
+        if PLAN.get('wiz_bed') and not state.get('asleep'):
+            ok = wiz({'state': False}) is not None
+            log('22:00: lampka za lozkiem off' + ('' if ok else ' (nie odpowiada)'))
     import socket
     now = time.time()
     if NL['socks'] is None:
@@ -1080,17 +1091,35 @@ def nl_event(on):
         log('lampka nocna %s, ale mnie nie ma: nic' % ('on' if on else 'off'))
         return
     if state.get('asleep'):
-        log('lampka nocna %s w nocy (juz spie, nic)' % ('on' if on else 'off'))
+        if on:
+            log('lampka nocna on w nocy (noc trwa)')
+            return
+        # ponowne zgaszenie w nocy: nowa pora zaśnięcia (statystyki snu i 8 h do budzenia światłem)
+        state['ln_t'] = time.time()
+        state['sleep_at'] = m
+        log('lampka nocna off ponownie: nowa pora zasniecia')
+        try:
+            gas({'e': 'down'}, False, 'phone')
+        except Exception as e:
+            log('lampka nocna: blad zapisu do arkusza %s' % e)
         return
     if on:
-        # lampka po 21:00: wszystko gaśnie poza lampą za kanapą
-        log('lampka nocna on: gasze wszystko poza lampa salon')
+        # lampka po 21:00: wszystko gaśnie poza lampą za kanapą, łazienka nocna, zasłony zasuwane
+        state['nl_eve'] = time.time()
+        cozy = PLAN['night_from'] <= m < 1320
+        log('lampka nocna on: gasze wszystko poza lampa salon%s' % (', lampka za lozkiem przytulnie do 22:00' if cozy else ''))
         for r in ('work', 'bed'):
             room_set(r, False, 'lampka nocna')
         if PLAN.get('kitchen_led'):
             plug_set(PLAN['kitchen_led'], False, 'kuchnia led off')
         if PLAN.get('wiz_bed'):
-            wiz({'state': False})
+            if cozy:
+                state['cozy'] = day_key()
+                wiz({'state': True, 'temp': 2200, 'dimming': 30})
+            else:
+                wiz({'state': False})
+        if state.get('cur_state') != 'close':
+            curtains('close', 'lampka nocna')
         return
     # zgaszona 21:00-4:00 = idę spać
     state['ln_t'] = time.time()
@@ -2142,7 +2171,7 @@ def day_key():
 
 SAVE_KEYS = ('eve_ret', 'morn', 'night_walks', 'asleep', 'bed_off_at', 'bed_eve', 'night_on', 'bed_pause', 'air', 'wl', 'sleep_at', 'robot_ev', 'robot_day', 'wiz_lvl',
              'cur_want', 'cur_why', 'cur_state', 'cur_day', 'boost_day', 'away_ev', 'away',
-             'rate_s', 'rate_b', 'heat_s', 'heat_b', 'ln_t', 'nl_seen')
+             'rate_s', 'rate_b', 'heat_s', 'heat_b', 'ln_t', 'nl_seen', 'nl_eve', 'cozy')
 
 
 def day_num():
@@ -2407,6 +2436,7 @@ def tick_rules(sync, q):
     if was and not asleep and ph and ph.get('e') == 'up':
         log('rano: telefon zdjety')
         state['ln_t'] = None
+        state['nl_eve'] = None
         state['morn'] = {'t0': time.time(), 'we': is_weekend()}
         room_set('bed', False, 'wstalem')  # sufit w sypialni gaśnie (wychodzę z sypialni)
         state['night_walks'] = 0
@@ -2447,7 +2477,7 @@ def tick_rules(sync, q):
         hum_on('bed_hum', 'b', None)
 
     # --- 21:00: zasłony w sypialni zasuwane (wieczorem dziwnie siedzieć przy odsłoniętych) ---
-    if m >= PLAN['night_from'] and state.get('cur_state') != 'close' and once('cur_eve'):
+    if not nl_mode() and m >= PLAN['night_from'] and state.get('cur_state') != 'close' and once('cur_eve'):
         curtains('close', 'wieczor 21:00')
 
     # (1.0.91: usunięte dawne „Światło Wieczór”: lampa salon tylko po powrocie wieczorem, LED-y wieczorem nigdy)
