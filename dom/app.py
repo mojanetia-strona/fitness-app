@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.114'
+VERSION = '1.0.115'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -63,7 +63,7 @@ PLAN = {
     'wiz_bed': '192.168.100.37',
     'night_lamp': True,     # lampka nocna (2× Osram SMART+ WiFi G9 na czarnym klawiszu): zgaszona 21:00-4:00 = noc
     'nl_ids': ['bf295d5589d3b6f19d1lqn', 'bfe41dd92e344b2ac8jpuh'],
-    'nl_off_s': 10,         # tyle sekund obie żarówki muszą milczeć, żeby uznać lampkę za zgaszoną
+    'nl_off_s': 5,          # tyle sekund obie żarówki muszą milczeć, żeby uznać lampkę za zgaszoną
     # --- klawisz jak zwykły włącznik: żarówka WiZ ma WiZclick z trybem 1 = „Wył.”, więc po podaniu prądu zostaje zgaszona
     # (mignięcie prądu w nocy niczego nie zapala); poza nocą płytka zapala ją od razu po powrocie do sieci ---
     'wiz_switch': True,
