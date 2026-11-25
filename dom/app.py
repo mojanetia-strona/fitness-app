@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.133'
+VERSION = '1.0.134'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -925,10 +925,13 @@ def bath_tick():
             MOT['rs_log'] = False
         k, dim = light_target('bath')
         use = ips[:1] if (night or nl_eve_on()) else ips
-        bad = []
-        for ip in use:  # z potwierdzeniem od żarówki (do 3 prób), nie „wyślij i zapomnij”
-            if wiz({'state': True, 'temp': k, 'dimming': dim}, 'setPilot', ip) is None:
-                bad.append(ip.split('.')[-1])
+        # wszystkie naraz szybką serią z potwierdzeniem (25.11), zamiast po kolei z czekaniem na każdą
+        pr = {'state': True, 'temp': k, 'dimming': dim}
+        bc = {'room': 'bath', 'on': True, 't0': time.time(), 'left': set(use), 'n': len(use), 'rs': 0, 'done': {}}
+        for ip in use:
+            WS.setdefault('want', {})[ip] = {'p': pr, 'until': time.time() + 60, 'at': time.time(), 'cmd': bc}
+        room_burst(use, pr, bc)
+        bad = [ip.split('.')[-1] for ip in bc['left']]
         if not MOT.get('rs_log'):
             MOT['rs_log'] = True
             tm = now_local()
@@ -983,8 +986,6 @@ def fb_process():
     if not pend:
         return
     now = time.time()
-    if now - min(t for t, _ in pend.values()) < 4:
-        return
     def room_ip(ip):
         if ip == PLAN.get('wiz_bed'):
             return 'lamp'
@@ -992,6 +993,23 @@ def fb_process():
             if x['ip'] == ip:
                 return room_of(mac) or mac[-4:].lower()
         return ip
+    # pokój właśnie zapalony klawiszem: kolejne żarówki tego pokoju (później złapały Wi-Fi) zapalamy od razu
+    hot = WZ.get('hot')
+    if hot and now < hot[1]:
+        for ip in list(pend.keys()):
+            if room_ip(ip) == hot[0]:
+                pend.pop(ip)
+                want = WS.setdefault('want', {})
+                if hot[0] in ('bed', 'work') and not (state.get('asleep') or state.get('wl') or state.get('away')):
+                    k, dim = light_target(hot[0])
+                    pr = {'state': True, 'temp': k, 'dimming': dim}
+                    cmd = {'room': hot[0], 'on': True, 't0': time.time(), 'left': {ip}, 'n': 1, 'rs': 0, 'done': {}}
+                    want[ip] = {'p': pr, 'until': time.time() + 300, 'at': time.time(), 'cmd': cmd}
+                    room_burst([ip], pr, cmd)
+        if not pend:
+            return
+    if now - min(t for t, _ in pend.values()) < PLAN.get('fb_wait', 2.5):
+        return
     rooms = set(room_ip(ip) for ip in pend)
     ips = list(pend.keys())
     WZ['pend'] = {}
@@ -999,6 +1017,13 @@ def fb_process():
         return  # tuż po starcie płytki to nie klawisz
     if len(rooms) > 1:
         log('zarowki: %d naraz z kilku pomieszczen (%s) - siec/prad, nic nie zapalam' % (len(ips), ','.join(sorted(str(r) for r in rooms))))
+        return
+    rm = list(rooms)[0]
+    if rm in ('bed', 'work') and PLAN.get('lt_auto', True) and not (state.get('asleep') or state.get('wl')) \
+            and not (SNAP['boot_rc'] == 'zasilanie' and now - BOOT_T[0] < 180) and not wiz_away(ips[0]):
+        # klawisz zasila cały pokój: zapalamy od razu wszystkie jego żarówki jedną serią (25.11, koniec „na raty”)
+        WZ['hot'] = (rm, now + 30)
+        room_set(rm, True, 'klawisz')
         return
     for ip in ips:
         wiz_power_on(ip, 'firstBeat')
