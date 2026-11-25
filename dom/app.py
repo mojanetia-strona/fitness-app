@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.136'
+VERSION = '1.0.137'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -2668,6 +2668,9 @@ def tick_rules(sync, q):
         state['nl_eve'] = None
         state['morn'] = {'t0': time.time(), 'we': is_weekend()}
         state['night_walks'] = 0
+        if MOT.get('on') and room_ips('bath'):
+            # pobudka zwykle z wagi w łazience (25.11): od razu pełne poranne światło na wszystkich żarówkach łazienki
+            room_set('bath', True, 'pobudka, jestem w lazience')
         room_set('work', True, 'rano')  # najpierw salon i kuchnia (tam idę), potem sypialnia gaśnie (25.11)
         room_set('bed', False, 'wstalem')  # sufit w sypialni gaśnie (wychodzę z sypialni)
         # wstałem i wychodzę z sypialni: lampka off na każdym etapie rozjaśniania (a jeśli się nie zaczęło, już nie ruszy)
