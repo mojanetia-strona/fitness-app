@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.132'
+VERSION = '1.0.133'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -772,8 +772,8 @@ def wiz_scan_tick():
             st['ok'] += len(d)
             st['rs'] += c['rs']
             st['slow'] += sum(1 for v in d if v > 3)
-            log('polecenie %s %s: %d/%d potwierdzone, najwolniej %.1f s, ponowien %d%s' % (
-                c['room'], 'on' if c['on'] else 'off', len(d), c['n'], d[-1] if d else 0, c['rs'],
+            log('polecenie %s %s: %d/%d potwierdzone (w serii do 4 s: %d), najwolniej %.1f s, ponowien %d%s' % (
+                c['room'], 'on' if c['on'] else 'off', len(d), c['n'], c.get('burst', 0), d[-1] if d else 0, c['rs'],
                 '' if not c['left'] else ', BRAK: ' + ' '.join('.' + i.split('.')[-1] for i in c['left'])))
     pres = ws_present()
     if not WS['inv']:
@@ -810,6 +810,53 @@ def wiz_scan_tick():
 MOT = {'t': 0, 'new': False, 'on': False}
 
 
+def room_burst(ips, pr, cmd):
+    """Szybka seria (25.11): żarówki WiZ co chwilę usypiają radio i gubią pojedyncze paczki UDP, a zwykłe ponawianie
+    w pętli płytki szło z przerwami (inne zadania), stąd zapalanie „na raty” (do 72 s). Teraz przez najwyżej 4 s
+    płytka zajmuje się tylko tymi żarówkami: wysyła polecenie co 0,25 s każdej niepotwierdzonej i od razu pyta o stan,
+    aż wszystkie potwierdzą. Resztę (rzadkie maruderki) dokańcza zwykła pętla."""
+    sock = WS.get('sock')
+    if not sock:
+        return
+    msg = json.dumps({'method': 'setPilot', 'params': pr}).encode()
+    ask = b'{"method":"getPilot","params":{}}'
+    left = set(ips)
+    t0 = time.ticks_ms()
+    last = -1000
+    while left and time.ticks_diff(time.ticks_ms(), t0) < PLAN.get('burst_ms', 4000):
+        now = time.ticks_ms()
+        if time.ticks_diff(now, last) >= 250:
+            last = now
+            for ip in left:
+                try:
+                    sock.sendto(msg, (ip, 38899))
+                    sock.sendto(ask, (ip, 38899))
+                except Exception:
+                    pass
+        for _ in range(40):
+            try:
+                data, addr = sock.recvfrom(1024)
+            except Exception:
+                break
+            try:
+                x = json.loads(data).get('result')
+            except Exception:
+                continue
+            if not isinstance(x, dict) or not x.get('mac'):
+                continue
+            WS['seen'][x['mac']] = {'ip': addr[0], 't': time.time(),
+                                    'p': {k: x[k] for k in ('state', 'temp', 'dimming', 'sceneId') if k in x}}
+            ip = addr[0]
+            if ip in left and bool(x.get('state')) == pr['state']:
+                left.discard(ip)
+                WS.get('want', {}).pop(ip, None)
+                if ip in cmd['left']:
+                    cmd['left'].discard(ip)
+                    cmd['done'][ip] = time.ticks_diff(time.ticks_ms(), t0) / 1000
+        time.sleep_ms(20)
+    cmd['burst'] = len(ips) - len(left)
+
+
 def room_set(room, on, why=''):
     """Zapala (w barwie pomieszczenia) albo gasi wszystkie żarówki pomieszczenia, bez czekania na odpowiedź."""
     ips = room_ips(room)
@@ -826,10 +873,7 @@ def room_set(room, on, why=''):
     for ip in ips:
         # zapamiętany cel na 5 min: dopóki żarówka nie potwierdzi stanu, płytka ponawia polecenie
         want[ip] = {'p': pr, 'until': time.time() + 300, 'at': time.time(), 'cmd': cmd}
-        ws_send(ip, pr)
-    time.sleep_ms(60)
-    for ip in ips:
-        ws_send(ip, pr)  # od razu drugi raz: pojedyncza paczka UDP przez mesh czasem ginie, a żarówki mają zapalać się razem
+    room_burst(ips, pr, cmd)
     if why:
         log('swiatla %s %s (%s, %d zarowek)' % (room, 'on' if on else 'off', why, len(ips)))
 
