@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.131'
+VERSION = '1.0.132'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -1773,6 +1773,17 @@ def http_tick():
         try:
             c.settimeout(1)
             req = c.recv(256)
+            src = _a[0] if isinstance(_a, tuple) else ''
+            if not (src.startswith('192.168.100.') and src != '192.168.100.1'):
+                # z internetu (przekierowanie portu na routerze): tylko /teraz z tokenem, najwyżej co 10 s
+                tok = cfg.get('gas_token') or ''
+                if (tok and b'/teraz' in req and ('k=' + tok).encode() in req
+                        and time.time() - GW_MOT.get('ext_t', 0) > 10):
+                    GW_MOT['ext_t'] = time.time()
+                    c.send(b'HTTP/1.0 200 OK\r\nContent-Length: 2\r\n\r\nok')
+                    NOW[0] = True
+                    print('teraz: synchronizacja na zadanie telefonu (z zewnatrz)')
+                continue
             c.send(b'HTTP/1.0 200 OK\r\nContent-Length: 2\r\n\r\nok')
             if b'/ruch?v=1' in req:
                 mot_set(True, 'bramka')
@@ -2210,8 +2221,31 @@ NOW = [False]  # wymuszenie natychmiastowej synchronizacji (np. pobudka z wagi)
 PC = {'on': None, 'evt': False, 't': 0}
 
 
+DESK = {'t': 0}
+
+
+def desk_quiet():
+    """Wieczorne wyciszenie: od 18:00 do poranka lampa nad biurkiem się nie pali."""
+    m = mins()
+    return m >= 1080 or m < 240 or bool(state.get('asleep'))
+
+
+def desk_tick():
+    """O 18:00 gasi lampę nad biurkiem i LED-y w kuchni; potem do rana pilnuje, żeby lampa nad biurkiem nie świeciła."""
+    if not desk_quiet() or time.time() - DESK['t'] < 20:
+        return
+    DESK['t'] = time.time()
+    if mins() >= 1080 and once('quiet18'):
+        if PLAN.get('kitchen_led') and light_on(PLAN['kitchen_led']):
+            plug_set(PLAN['kitchen_led'], False, '18:00 wyciszenie: kuchnia led off')
+    ip = PLAN.get('desk_light')
+    if ip and light_on(ip):
+        plug_set(ip, False, 'lampa biurko off (po 18:00 nie swieci do rana)')
+
+
 def pc_tick():
     # co 15 s stan gniazdka przy komputerze; przejście OFF -> ON = komputer włączony, arkusz wyłącza poranną muzykę
+    desk_tick()
     ip = PLAN.get('pc_plug')
     if not ip or time.time() - PC['t'] < 15:
         return
@@ -2233,6 +2267,8 @@ def pc_tick():
         NOW[0] = True
         log('komputer wlaczony')
         m = mins()
+        if desk_quiet():
+            DESK['t'] = time.time() - 15  # lampa nad biurkiem zapala się z komputerem: sprawdzenie za ok. 5 s
         if PLAN.get('kitchen_led') and not state.get('asleep') and 240 <= m < sun_min(False):
             plug_set(PLAN['kitchen_led'], True, 'komputer wlaczony: kuchnia led on')  # tylko w dzień (do zmierzchu)
         mo = state.get('morn')
