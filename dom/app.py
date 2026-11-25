@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.138'
+VERSION = '1.0.139'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -2955,6 +2955,26 @@ def restore_tick():
         log('prad: brak zapisanego stanu urzadzen, nic nie przywracam')
         return
     done = []
+    # zasada „światła pierwsze” (25.11): żarówki naraz serią, dopiero potem nawilżacze i oczyszczacz
+    groups = {}
+    for ip in [k[4:] for k in d if k.startswith('wiz_')]:
+        st = d.get('wiz_' + ip)
+        if st and st.get('state'):
+            pr = {k: v for k, v in st.items() if k != 'state'}
+            pr['state'] = True
+            groups.setdefault(json.dumps(pr), []).append(ip)
+    for pj, ips in groups.items():
+        pr = json.loads(pj)
+        cmd = {'room': 'prad', 'on': True, 't0': time.time(), 'left': set(ips), 'n': len(ips), 'rs': 0, 'done': {}}
+        for ip in ips:
+            WS.setdefault('want', {})[ip] = {'p': pr, 'until': time.time() + 300, 'at': time.time(), 'cmd': cmd}
+            WZ['st'][ip] = True
+        room_burst(ips, pr, cmd)
+        done += ['%s wl' % ip[-3:] for ip in ips]
+    for key in ('lamp_salon', 'kitchen_led'):
+        st = d.get(key)
+        if st and PLAN.get(key):
+            plug_set(PLAN[key], bool(st.get('on')), 'prad: %s %s' % (key, 'wl' if st.get('on') else 'wyl'))
     for name, keys in SNAP_DEV.items():
         st = d.get(name)
         if not st or not dev.get(name):
@@ -2971,18 +2991,6 @@ def restore_tick():
         else:
             dev_set(name, 'on', False)
             done.append('%s wyl' % name)
-    for key in ('lamp_salon', 'kitchen_led'):
-        st = d.get(key)
-        if st and PLAN.get(key):
-            plug_set(PLAN[key], bool(st.get('on')), 'prad: %s %s' % (key, 'wl' if st.get('on') else 'wyl'))
-    for ip in [k[4:] for k in d if k.startswith('wiz_')]:
-        st = d.get('wiz_' + ip)
-        if st and st.get('state'):
-            pr = {k: v for k, v in st.items() if k != 'state'}
-            pr['state'] = True
-            wiz(pr, 'setPilot', ip)
-            WZ['st'][ip] = True
-            done.append('%s wl' % ip[-3:])
     log('prad wrocil, przywracam stan: %s' % (', '.join(done) or 'nic'))
 
 
