@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.129'
+VERSION = '1.0.130'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -567,7 +567,7 @@ def morning_on():
         return False
     age = time.time() - mo['t0']
     if mo.get('we'):
-        return age < 3600
+        return age < 5400 and not mo.get('shower')  # weekend: do końca prysznica, najdłużej 1,5 h
     return age < 3 * 3600 and not mo.get('pc')
 
 
@@ -591,7 +591,7 @@ def light_target(room='work', m=None):
     if state.get('asleep'):
         return 2700, 50
     if morning_on():
-        return 3000, 65            # rano: ciepłe, nie dzienne
+        return PLAN.get('eve_k', 2700), PLAN.get('eve_dim', 40)  # rano jak wieczór (25.11): ciepło, przygaszone
     if dark and (state.get('eve_ret') == day_key() or m >= PLAN.get('eve_from', 1140) or m < 240):
         # tryb wieczór: po zmierzchu i od 19:00 (albo po powrocie po zmroku): klimatycznie, delikatnie
         return PLAN.get('eve_k', 2700), PLAN.get('eve_dim', 40)
@@ -699,9 +699,16 @@ def wiz_scan_tick():
     # znane żarówki: po 4 na raz, bezpośrednio (płytka mieści w buforze tylko kilka odpowiedzi naraz,
     # przy 27 odpowiedziach jednocześnie większość ginęła i obecność migała)
     for ip in list(WS.get('want', {}).keys()):  # żarówki z niepotwierdzonym poleceniem: pytamy co sekundę
-        if t > WS['want'][ip]['until']:
+        w = WS['want'][ip]
+        if t > w['until']:
             WS['want'].pop(ip, None)
             continue
+        if t - w['at'] > 1.5:
+            # brak potwierdzenia (zgubione polecenie albo zgubiona odpowiedź): ponawiamy samo polecenie, nie czekając
+            w['at'] = t
+            if w.get('cmd'):
+                w['cmd']['rs'] += 1
+            ws_send(ip, w['p'])
         try:
             WS['sock'].sendto(msg, (ip, 38899))
         except Exception:
@@ -820,6 +827,9 @@ def room_set(room, on, why=''):
         # zapamiętany cel na 5 min: dopóki żarówka nie potwierdzi stanu, płytka ponawia polecenie
         want[ip] = {'p': pr, 'until': time.time() + 300, 'at': time.time(), 'cmd': cmd}
         ws_send(ip, pr)
+    time.sleep_ms(60)
+    for ip in ips:
+        ws_send(ip, pr)  # od razu drugi raz: pojedyncza paczka UDP przez mesh czasem ginie, a żarówki mają zapalać się razem
     if why:
         log('swiatla %s %s (%s, %d zarowek)' % (room, 'on' if on else 'off', why, len(ips)))
 
@@ -886,6 +896,7 @@ def bath_tick():
                 ws_send(ip, {'state': False})
         if not MOT['on']:
             MOT['on'] = True
+            MOT['on_at'] = time.time()
             log('lazienka ruch: on %sK %s%%' % (k, dim))
             if night:
                 state['night_walks'] = (state.get('night_walks') or 0) + 1  # nocne wyjścia do łazienki (jakość snu)
@@ -901,6 +912,15 @@ def bath_tick():
             log('lazienka: czujnik nie zglosil konca ruchu, gasze po czasie')
         MOT['chk'] = time.time()
         lit = [x['ip'] for mac, x in ws_present().items() if room_of(mac) == 'bath' and x['p'].get('state')]
+        if MOT['on']:
+            # weekendowy poranek kończy się po prysznicu: pobyt w łazience co najmniej 5 min, potem wyjście
+            mo = state.get('morn')
+            if mo and mo.get('we') and not mo.get('shower') and morning_on() \
+                    and MOT.get('lt', 0) - MOT.get('on_at', time.time()) >= PLAN.get('shower_min', 300):
+                mo['shower'] = True
+                log('poranek: koniec prysznica, salon i kuchnia w tryb dzienny')
+                if [1 for mac, x in ws_present().items() if room_of(mac) == 'work' and x['p'].get('state')]:
+                    room_set('work', True, 'po prysznicu')
         if MOT['on'] or lit:
             if lit and not MOT['on'] and time.time() - MOT.get('lg', 0) > 600:
                 MOT['lg'] = time.time()
