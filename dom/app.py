@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.137'
+VERSION = '1.0.138'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -63,7 +63,7 @@ PLAN = {
     'wiz_bed': '192.168.100.37',
     'night_lamp': True,     # lampka nocna (2× Osram SMART+ WiFi G9 na czarnym klawiszu): zgaszona 21:00-4:00 = noc
     'nl_ids': ['bf295d5589d3b6f19d1lqn', 'bfe41dd92e344b2ac8jpuh'],
-    'nl_off_s': 5,          # tyle sekund obie żarówki muszą milczeć, żeby uznać lampkę za zgaszoną
+    'nl_off_s': 2,          # tyle sekund obie żarówki muszą milczeć, żeby uznać lampkę za zgaszoną
     # --- klawisz jak zwykły włącznik: żarówka WiZ ma WiZclick z trybem 1 = „Wył.”, więc po podaniu prądu zostaje zgaszona
     # (mignięcie prądu w nocy niczego nie zapala); poza nocą płytka zapala ją od razu po powrocie do sieci ---
     'wiz_switch': True,
@@ -236,16 +236,17 @@ def trv_call(trv_id, method, params):
 
 def plug_set(ip, on, label):
     # gniazdko Shelly Gen3 w sieci domowej (lokalne RPC)
-    for i in range(3):
+    for i in range(2):  # 25.11: było 3 × 8 s (do ok. 30 s blokady), teraz najwyżej ok. 7 s
         try:
             gc.collect()
-            r = requests.get('http://%s/rpc/Switch.Set?id=0&on=%s' % (ip, 'true' if on else 'false'), timeout=8)
+            r = requests.get('http://%s/rpc/Switch.Set?id=0&on=%s' % (ip, 'true' if on else 'false'), timeout=3)
             r.close()
             log(label)
             return True
         except Exception as e:
             last = e
-            time.sleep(2)
+            fast_tick()
+            time.sleep_ms(500)
     log('%s blad %s' % (label, last))
     return False
 
@@ -1184,7 +1185,7 @@ def nl_tick():
                 print('nl probe', e)
     if not NL['ips'] or now - BOOT_T[0] < 20:
         return
-    alive = any(now - t < 5 for t in NL['seen'].values())
+    alive = any(now - t < PLAN.get('nl_alive_s', 3.5) for t in NL['seen'].values())
     if alive:
         state['nl_seen'] = now
         NL['off_since'] = 0
@@ -1814,6 +1815,17 @@ def mot_set(v, why):
         MOT['src'] = why
     MOT['t'] = now  # ruch: od teraz; brak ruchu: od teraz liczy się czas do zgaszenia
     GW_MOT['val'] = v
+
+
+def fast_tick():
+    """Lekkie, nieblokujące sprawdzenie (25.11): szturchnięcia, ucho z łazienki, ruch -> światło.
+    Wołane między wolnymi rzeczami (arkusz, urządzenia), żeby światło w łazience nie czekało na nie."""
+    try:
+        http_tick()
+        ucho_tick()
+        bath_tick()
+    except Exception as e:
+        print('fast', e)
 
 
 def http_tick():
@@ -3004,6 +3016,7 @@ def run():
                     pass
             if force or time.time() - last_sync >= every:
                 last_sync = time.time()
+                fast_tick()  # ruch w łazience obsłużony przed kilkusekundową synchronizacją z arkuszem
                 try:
                     sync = gas({'pc': 'on'} if PC['evt'] else {})
                     PC['evt'] = False
@@ -3023,8 +3036,10 @@ def run():
                         machine.reset()
             if force or time.time() - last_rules >= 30:
                 last_rules = time.time()
+                fast_tick()
                 q = dev_get('qingping', ['q_rh', 'q_pm25', 'q_t', 'q_co2'])
                 state['q'] = q
+                fast_tick()
                 tick_rules(sync, q)
                 save_state()
             scale_tick()
@@ -3045,6 +3060,7 @@ def run():
             snap_tick()
             if log_buf and (time.time() - last_report > 120 or len(log_buf) > 8):
                 last_report = time.time()
+                fast_tick()
                 flush_log()
             if time.time() - state.get('hb', 0) > 1800:
                 state['hb'] = time.time()
@@ -3058,4 +3074,6 @@ def run():
         except Exception as e:
             log('blad petli %s' % e)
         gc.collect()
-        time.sleep(1)
+        for _ in range(4):  # zamiast 1 s snu: co 0,25 s lekkie sprawdzenie łazienki (gniazda bez czekania)
+            time.sleep_ms(250)
+            fast_tick()

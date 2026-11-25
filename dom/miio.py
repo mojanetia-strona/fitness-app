@@ -34,7 +34,7 @@ class Device:
         self.mid = int(time.time()) % 10000
         self.fail = 0
 
-    def _sock(self, timeout=3):
+    def _sock(self, timeout=2):
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.settimeout(timeout)
         return s
@@ -72,7 +72,11 @@ class Device:
             raise OSError('miio %s: %s' % (self.name, r['error']))
         return r.get('result')
 
-    def call(self, method, params, tries=3):
+    def call(self, method, params, tries=2):
+        # 25.11: urządzenie, które właśnie 3 razy nie odpowiedziało, przez 2 min pomijamy od razu
+        # (zamiast czekać za każdym razem kilkanaście sekund), potem znów próbujemy
+        if self.fail >= 3 and time.time() - getattr(self, 'fail_at', 0) < 120:
+            raise OSError('miio %s: chwilowo pomijany (nie odpowiada)' % self.name)
         last = None
         for i in range(tries):
             try:
@@ -84,6 +88,7 @@ class Device:
                 self.did = None
                 time.sleep(0.5)
         self.fail += 1
+        self.fail_at = time.time()
         raise last
 
     def get(self, props):
