@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.130'
+VERSION = '1.0.131'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -591,7 +591,7 @@ def light_target(room='work', m=None):
     if state.get('asleep'):
         return 2700, 50
     if morning_on():
-        return PLAN.get('eve_k', 2700), PLAN.get('eve_dim', 40)  # rano jak wieczór (25.11): ciepło, przygaszone
+        return PLAN.get('morn_k', 2800), PLAN.get('morn_dim', 50)  # rano (25.11): ciepło, przygaszone
     if dark and (state.get('eve_ret') == day_key() or m >= PLAN.get('eve_from', 1140) or m < 240):
         # tryb wieczór: po zmierzchu i od 19:00 (albo po powrocie po zmroku): klimatycznie, delikatnie
         return PLAN.get('eve_k', 2700), PLAN.get('eve_dim', 40)
