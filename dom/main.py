@@ -2,7 +2,33 @@
 import time, json, machine, network, gc
 
 RAW = 'https://raw.githubusercontent.com/mojanetia-strona/fitness-app/main/dom/'
-FILES = ('miio.mpy', 'app.mpy', 'main.py')  # .mpy = skompilowane, mniej pamięci
+FILES = ('miio.mpy', 'app.mpy', 'main.py', 'ucho.py')  # .mpy = skompilowane, mniej pamięci
+
+
+def is_ucho():
+    # zapasowe ESP32 (nie S3) pracuje tylko jako ucho w łazience; główną płytką jest ESP32-S3
+    import os
+    try:
+        return 'S3' not in os.uname().machine
+    except Exception:
+        return False
+
+
+def get_ucho():
+    try:
+        open('ucho.py').close()
+        return
+    except OSError:
+        pass
+    try:
+        import requests
+    except ImportError:
+        import urequests as requests
+    r = requests.get(RAW + 'ucho.py')
+    if r.status_code == 200:
+        with open('ucho.py', 'w') as o:
+            o.write(r.text)
+    r.close()
 
 
 def wifi(cfg):
@@ -110,6 +136,11 @@ def main():
     set_time()
     if cfg.get('auto_update', True):
         update()
+    if is_ucho():
+        get_ucho()
+        import ucho
+        ucho.run()
+        return
     import app
     app.run()
 

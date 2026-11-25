@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.126'
+VERSION = '1.0.127'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -1918,6 +1918,44 @@ def ble_irq(event, data):
         pass
 
 
+# ---------- ucho w łazience (zapasowe ESP32): przekazuje wiadomości Bluetooth czujnika ruchu i wagi ----------
+UCHO = {'sock': None, 'seen': 0, 'info': '', 'n': 0, 'logged': 0}
+
+
+def ucho_tick():
+    if UCHO['sock'] is None:
+        try:
+            import socket
+            u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            u.bind(('0.0.0.0', 8090))
+            u.setblocking(False)
+            UCHO['sock'] = u
+        except Exception as e:
+            print('ucho bind', e)
+            UCHO['sock'] = False
+            return
+    if not UCHO['sock']:
+        return
+    for _ in range(20):
+        try:
+            p, addr = UCHO['sock'].recvfrom(300)
+        except Exception:
+            break
+        if addr[0] != PLAN.get('ucho_ip', addr[0]):
+            continue
+        if p[:2] == b'UH':
+            first = not UCHO['seen']
+            UCHO['seen'] = time.time()
+            UCHO['info'] = p[2:].decode()
+            if first or time.time() - UCHO['logged'] > 6 * 3600:
+                UCHO['logged'] = time.time()
+                log('ucho lazienka: w sieci (%s, %s), odebranych wiadomosci %d' % (addr[0], UCHO['info'], UCHO['n']))
+        elif p[:2] == b'U1' and len(p) > 8:
+            UCHO['seen'] = time.time()
+            UCHO['n'] += 1
+            ble_irq(5, (0, p[2:8], 0, 0, p[8:]))  # jak własny Bluetooth: te same reguły, jedna decyzja
+
+
 BLE = [None]
 
 
@@ -2861,6 +2899,7 @@ def run():
             nl_tick()
             wiz_scan_tick()
             http_tick()
+            ucho_tick()
             gw_motion()
             bath_tick()
             wiz_switch_tick(sync)
