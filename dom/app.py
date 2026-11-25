@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.139'
+VERSION = '1.0.140'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -731,7 +731,11 @@ def wiz_scan_tick():
         except Exception:
             pass
         WS['bc'] += 1
-        WS['sw'] = 2  # do tego przegląd każdego adresu w sieci (broadcast gubi część żarówek)
+        # przegląd każdego adresu (254 paczki) tylko po starcie i co 15 min (25.11): żarówki mają stałe IP,
+        # a nowe i tak zgłaszają się same (firstBeat) i odpowiadają na broadcast co minutę
+        if t - WS.get('sw_at', 0) >= 900 or t - BOOT_T[0] < 30:
+            WS['sw_at'] = t
+            WS['sw'] = 2
     if WS.get('sw'):
         base = PLAN.get('wiz_net', '192.168.100.')
         a = WS['sw']
@@ -1168,7 +1172,9 @@ def nl_tick():
             except Exception:
                 pass
             del NL['probe'][ip]
-    if now - NL['probe_at'] >= 2:
+    m_ = mins()
+    # pukanie do lampki: wieczorem i w nocy co 2 s (szybka reakcja), w dzień co 10 s (lampka nic wtedy nie steruje)
+    if now - NL['probe_at'] >= (2 if (m_ >= 1200 or m_ < 300 or NL['on']) else 10):
         NL['probe_at'] = now
         for ip in set(NL['ips'].values()):
             if ip in NL['probe']:
