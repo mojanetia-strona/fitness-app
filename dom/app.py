@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.125'
+VERSION = '1.0.126'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -578,7 +578,7 @@ def light_target(room='work', m=None):
     dark = m >= ss or m < 240  # po zachodzie słońca (zmierzch) do 4:00
     if room == 'bath':
         if state.get('asleep') or nl_eve_on():
-            return 2700, 15        # noc: jedna żarówka, ciemno i ciepło
+            return 2700, 10        # noc: jedna żarówka, minimum WiZ (10%), ciepło
         if morning_on():
             return 6000, 100       # rano: białe, jasne, rozbudza
         return (2700, 45) if dark else (5000, 100)  # po zmierzchu ciepło i przygaszone, relaksująco
@@ -1160,7 +1160,7 @@ def nl_event(on):
         bips = sorted(room_ips('bath'))
         lit = [x['ip'] for mac, x in ws_present().items() if room_of(mac) == 'bath' and x['p'].get('state')]
         if bips and (lit or MOT.get('on')):
-            ws_send(bips[0], {'state': True, 'temp': 2700, 'dimming': 15})
+            ws_send(bips[0], {'state': True, 'temp': 2700, 'dimming': 10})
             for ip in bips[1:]:
                 ws_send(ip, {'state': False})
             log('lazienka: tryb nocny (jedna zarowka)')
