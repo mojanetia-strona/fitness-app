@@ -20,8 +20,10 @@ function straznik() {
 
   // 1. płytka milczy: ostatni wpis stanu (co 30 min) albo start płytki
   const status = rows.filter(r => /^ok RH /.test(String(r[1])) || /start v\d/.test(String(r[1])));
-  const last = status.length ? status[status.length - 1][0].getTime() : 0;
-  if (now - last > 45 * 60e3) {
+  // 25.11: płytka zgłasza się do arkusza co ok. 2 min (ESP_LAST zapisuje Kod.gs), więc alarm już po 10 min ciszy
+  const espLast = Number(PropertiesService.getScriptProperties().getProperty('ESP_LAST') || 0);
+  const last = Math.max(status.length ? status[status.length - 1][0].getTime() : 0, espLast);
+  if (now - last > (espLast ? 10 : 45) * 60e3) {
     problems.plytka = { t: 'Płytka domu nie odpowiada', d: 'Ostatni wpis stanu: ' + (last ? Utilities.formatDate(new Date(last), TZ, 'd.MM HH:mm') : 'brak') +
       '. Automatyka domu nie działa. Sprawdzić, czy płytka ma prąd i Wi-Fi; najprościej wyjąć ją z gniazdka na 5 s.' };
   }

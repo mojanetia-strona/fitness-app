@@ -342,7 +342,7 @@ function doGet(e) {
   if (p.action === 'phone') return json_(phoneEvent_(ss, p.e));
   if (p.action === 'gym') return json_(gymEvent_(ss, p.e, p.g));
   if (p.action === 'away') return json_(awayEvent_(ss, p.e));
-  if (p.action === 'esp') return json_(espSync_(ss, p));
+  if (p.action === 'esp') { PropertiesService.getScriptProperties().setProperty('ESP_LAST', String(Date.now())); return json_(espSync_(ss, p)); } // strażnik: ostatnie zgłoszenie płytki
   if (p.action === 'ean') return json_(eanLookup_(ss, p.code)); // test z przeglądarki
   if (p.action === 'diet') return json_(Object.assign({ ok: true }, dietRange_(ss, p.from || '', p.to || ''), { gym: gymRecent_(ss) }));
   return json_({ ok: true, name: ss.getName() });
