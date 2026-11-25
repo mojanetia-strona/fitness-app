@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.127'
+VERSION = '1.0.128'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -886,10 +886,11 @@ def bath_tick():
                 state['night_walks'] = (state.get('night_walks') or 0) + 1  # nocne wyjścia do łazienki (jakość snu)
                 log('lazienka w nocy (%d. raz tej nocy)' % state['night_walks'])
     elif time.time() - MOT.get('lt', MOT['t']) > bath_timeout(night) and time.time() - MOT.get('chk', 0) > 20 \
-            and (not GW_MOT['val'] or time.time() - MOT.get('lt', MOT['t']) > bath_timeout(night) + 120):
+            and (not GW_MOT['val'] or time.time() - MOT.get('lt', MOT['t']) > PLAN.get('bath_stuck', 1200)):
         # brak ruchu: gasimy, także gdy światło zapaliło się inaczej (klawisz, aplikacja).
-        # Zgubiona wiadomość „brak ruchu” z czujnika (24.11: świeciło kilkadziesiąt minut): po czasie + 2 min bez żadnej
-        # wiadomości o ruchu uznajemy, że ruchu nie ma, i następny ruch znów zapali światło.
+        # Czujnik przy ciągłym ruchu nic nie nadaje (stan „ruch” trwa), a koniec ruchu zgłasza osobną wiadomością.
+        # Dopóki stan to „ruch”, światło świeci. Zabezpieczenie na zgubioną wiadomość o końcu: 20 min bez żadnej
+        # wiadomości (25.11: 4 min gasiły światło, gdy byłem w łazience).
         if GW_MOT['val']:
             GW_MOT['val'] = False
             log('lazienka: czujnik nie zglosil konca ruchu, gasze po czasie')
