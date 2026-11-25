@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.135'
+VERSION = '1.0.136'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -2667,9 +2667,9 @@ def tick_rules(sync, q):
         state['ln_t'] = None
         state['nl_eve'] = None
         state['morn'] = {'t0': time.time(), 'we': is_weekend()}
-        room_set('bed', False, 'wstalem')  # sufit w sypialni gaśnie (wychodzę z sypialni)
         state['night_walks'] = 0
-        room_set('work', True, 'rano')  # salon i kuchnia: ciepłe 65% do komputera (weekend: 1 h)
+        room_set('work', True, 'rano')  # najpierw salon i kuchnia (tam idę), potem sypialnia gaśnie (25.11)
+        room_set('bed', False, 'wstalem')  # sufit w sypialni gaśnie (wychodzę z sypialni)
         # wstałem i wychodzę z sypialni: lampka off na każdym etapie rozjaśniania (a jeśli się nie zaczęło, już nie ruszy)
         if PLAN['wake_light'] and PLAN.get('wiz_bed'):
             was_on = state.get('wl') is not None or state.get('wl_done') == time.localtime()[2]
