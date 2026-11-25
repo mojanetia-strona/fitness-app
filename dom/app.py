@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.134'
+VERSION = '1.0.135'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -2542,37 +2542,38 @@ def tick_rules(sync, q):
                 boost_off(n)
             if state['away']:
                 # dawna rutyna Google Home „Wyjście → Wszystko OFF” (+ lampa salon i lampka sypialnia, których tam brakowało)
-                log('wyjscie z domu: wszystko off, grzejniki %s' % PLAN['away_temp'])
-                for d in ('bed_hum', 'salon_hum', 'salon_pur'):
-                    dev_set(d, 'on', False)
-                for key in ('lamp_salon', 'kitchen_led'):
-                    if PLAN.get(key):
-                        plug_set(PLAN[key], False, key + ' off')
-                if PLAN.get('wiz_bed'):
-                    wiz({'state': False})
+                # kolejność (25.11): najpierw światło, bo je widać; urządzenia potem
                 for r in ('work', 'bed', 'bath'):
                     room_set(r, False)
-                log('wyjscie: zarowki off')
+                if PLAN.get('wiz_bed'):
+                    wiz({'state': False})
+                for key in ('lamp_salon', 'kitchen_led', 'desk_light'):
+                    if PLAN.get(key):
+                        plug_set(PLAN[key], False, key + ' off')
+                log('wyjscie z domu: zarowki off, potem wszystko off, grzejniki %s' % PLAN['away_temp'])
+                for d in ('bed_hum', 'salon_hum', 'salon_pur'):
+                    dev_set(d, 'on', False)
             elif not asleep:
                 # dawne rutyny „Powrót do domu Pon-Pt”, „DOM Weekend ON” i „Światło Wieczór”, bez ich okienek godzinowych
                 bed_ok = weekend or m >= 1080  # Pon-Pt sypialnia dopiero od 18:00
                 if m >= 1080 or m < 240:
                     state['ret18'] = day_key()  # powrót po 18:00: łazienka gaśnie po 8 min (prysznic)
                 eve = (m >= max(1080, sun_min(False))) or m < 240  # wieczór = po zmierzchu, ale nie wcześniej niż 18:00
+                # kolejność (25.11): najpierw światło, bo je widać; nawilżacze i reszta potem
+                if eve:  # wieczorem: salon, kuchnia i sypialnia klimatycznie (LED-y w kuchni za mocne: off; Lampa Salon tylko do czytania)
+                    state['eve_ret'] = day_key()
+                    room_set('work', True, 'powrot wieczorem, klimatycznie')
+                    room_set('bed', True, 'powrot wieczorem')  # sypialnia ciepło, przygaszona
+                else:
+                    room_set('work', True, 'powrot w dzien')  # cały salon i kuchnia
                 log('powrot do domu: salon on%s%s' % (', sypialnia on' if bed_ok else '', ', wieczor' if eve else ''))
+                if eve and PLAN.get('kitchen_led'):
+                    plug_set(PLAN['kitchen_led'], False, 'kitchen_led off (wieczor)')
                 hum_on('salon_hum', 's', None)
                 hum_on('salon_pur', 's', None)
                 if bed_ok:
                     hum_on('bed_hum', 'b', None)
                     state['bed_eve'] = day_key()
-                if eve:  # wieczorem: salon, kuchnia i sypialnia klimatycznie (LED-y w kuchni za mocne: off; Lampa Salon tylko do czytania)
-                    state['eve_ret'] = day_key()
-                    room_set('work', True, 'powrot wieczorem, klimatycznie')
-                    room_set('bed', True, 'powrot wieczorem')  # sypialnia ciepło, przygaszona
-                    if PLAN.get('kitchen_led'):
-                        plug_set(PLAN['kitchen_led'], False, 'kitchen_led off (wieczor)')
-                else:
-                    room_set('work', True, 'powrot w dzien')  # cały salon i kuchnia
             if not state['away'] and dev.get('robot') and PLAN.get('robot_dock'):
                 # wracam: robot na stację, nawet jeśli nie skończył (dawne „Zadokuj Robota”)
                 try:
@@ -2604,14 +2605,14 @@ def tick_rules(sync, q):
                 state['sleep_at'] = h * 60 + mi  # pora odłożenia telefonu: od niej liczymy 8 h snu
         except Exception:
             state['sleep_at'] = mins()
-        dev_set('bed_hum', 'on', False, 'sypialnia nawilzacz off')
-        if PLAN.get('lamp_salon'):
+        if PLAN.get('lamp_salon'):  # najpierw światła (25.11), urządzenia potem
             plug_set(PLAN['lamp_salon'], False, 'lampa salon off')
         if PLAN.get('kitchen_led'):
             plug_set(PLAN['kitchen_led'], False, 'kuchnia led off')
         if PLAN.get('wiz_bed'):
             state['wl'] = None
             log('lampka sypialnia off' if wiz({'state': False}) is not None else 'lampka sypialnia nie odpowiada (%s)' % state.get('wiz_err'))
+        dev_set('bed_hum', 'on', False, 'sypialnia nawilzacz off')
         # salon na noc: nawilżacz i oczyszczacz zostają włączone, ale w trybie nocnym (cicho)
         dev_set('salon_hum', 'on', True)
         dev_set('salon_hum', 'sh_mode', 1, 'salon nawilzacz tryb nocny')
