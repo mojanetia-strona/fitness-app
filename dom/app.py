@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.128'
+VERSION = '1.0.129'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -825,9 +825,14 @@ def room_set(room, on, why=''):
 
 
 def bath_timeout(night):
-    """Ile sekund bez ruchu, zanim łazienka zgaśnie (23.11, do testów): zawsze 2 min, w nocy 1 min.
-    Liczone od ostatniego ruchu. Gdyby gasło pod prysznicem: dłuższe czasy rano/wieczorem."""
-    return PLAN.get('bath_off_night', 60) if night else PLAN.get('bath_off_day', 120)
+    """Ile sekund bez ruchu, zanim łazienka zgaśnie (25.11): w nocy 1 min; pora prysznica 8 min
+    (rano w trybie porannym, wieczorem od 20:00 albo po powrocie po 18:00); w dzień 2 min."""
+    if night:
+        return PLAN.get('bath_off_night', 60)
+    m = mins()
+    if morning_on() or m >= PLAN.get('bath_long_from', 1200) or m < 240 or state.get('ret18') == day_key():
+        return PLAN.get('bath_off_shower', 480)
+    return PLAN.get('bath_off_day', 120)
 
 
 def bath_tick():
@@ -2252,7 +2257,7 @@ def day_key():
     return '%04d%02d%02d' % (tm[0], tm[1], tm[2])
 
 
-SAVE_KEYS = ('eve_ret', 'morn', 'night_walks', 'asleep', 'bed_off_at', 'bed_eve', 'night_on', 'bed_pause', 'air', 'wl', 'sleep_at', 'robot_ev', 'robot_day', 'wiz_lvl',
+SAVE_KEYS = ('eve_ret', 'ret18', 'morn', 'night_walks', 'asleep', 'bed_off_at', 'bed_eve', 'night_on', 'bed_pause', 'air', 'wl', 'sleep_at', 'robot_ev', 'robot_day', 'wiz_lvl',
              'cur_want', 'cur_why', 'cur_state', 'cur_day', 'boost_day', 'away_ev', 'away',
              'rate_s', 'rate_b', 'heat_s', 'heat_b', 'ln_t', 'nl_seen', 'nl_eve', 'cozy')
 
@@ -2426,6 +2431,8 @@ def tick_rules(sync, q):
             elif not asleep:
                 # dawne rutyny „Powrót do domu Pon-Pt”, „DOM Weekend ON” i „Światło Wieczór”, bez ich okienek godzinowych
                 bed_ok = weekend or m >= 1080  # Pon-Pt sypialnia dopiero od 18:00
+                if m >= 1080 or m < 240:
+                    state['ret18'] = day_key()  # powrót po 18:00: łazienka gaśnie po 8 min (prysznic)
                 eve = (m >= max(1080, sun_min(False))) or m < 240  # wieczór = po zmierzchu, ale nie wcześniej niż 18:00
                 log('powrot do domu: salon on%s%s' % (', sypialnia on' if bed_ok else '', ', wieczor' if eve else ''))
                 hum_on('salon_hum', 's', None)
