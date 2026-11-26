@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.146'
+VERSION = '1.0.147'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -855,7 +855,10 @@ def room_burst(ips, pr, cmd):
             WS['seen'][x['mac']] = {'ip': addr[0], 't': time.time(),
                                     'p': {k: x[k] for k in ('state', 'temp', 'dimming', 'sceneId') if k in x}}
             ip = addr[0]
-            if ip in left and bool(x.get('state')) == pr['state']:
+            ok_ = bool(x.get('state')) == pr['state']
+            if ok_ and pr['state'] and 'temp' in pr:  # zmiana barwy: potwierdzone dopiero, gdy barwa i jasność się zgadzają
+                ok_ = abs((x.get('temp') or 0) - pr['temp']) < 100 and abs((x.get('dimming') or 0) - pr.get('dimming', 0)) < 5
+            if ip in left and ok_:
                 left.discard(ip)
                 WS.get('want', {}).pop(ip, None)
                 if ip in cmd['left']:
@@ -1858,6 +1861,40 @@ def mot_set(v, why):
     GW_MOT['val'] = v
 
 
+TGT = {'t': 0, 'last': {}}
+
+
+def target_tick():
+    """Zmiana barwy/jasności z trybu (dzień, wieczór, rano, komputer, czytanie...) dla świecących żarówek:
+    od razu cały pokój jedną serią z potwierdzeniem (26.11), a nie po kolei, gdy która się odezwie."""
+    if time.time() - TGT['t'] < 1 or not PLAN.get('lt_auto', True):
+        return
+    TGT['t'] = time.time()
+    if state.get('away') or wake_hold():
+        return
+    lit_all = [(mac, x) for mac, x in ws_present().items() if x['p'].get('state')]
+    for room in ('work', 'bed', 'bath'):
+        if room != 'bath' and state.get('asleep'):
+            continue
+        k, dim = light_target(room)
+        prev = TGT['last'].get(room)
+        TGT['last'][room] = (k, dim)
+        if prev is None or prev == (k, dim):
+            continue
+        ips = [x['ip'] for mac, x in lit_all if room_of(mac) == room and mac[-4:].lower() != BED_LAMP
+               and x['ip'] != PLAN.get('wiz_bed')]
+        if room == 'bath' and (state.get('asleep') or nl_eve_on()):
+            continue  # łazienka nocna: jedna żarówka, tym steruje czujnik
+        if not ips:
+            continue
+        pr = {'state': True, 'temp': k, 'dimming': dim}
+        cmd = {'room': room, 'on': True, 't0': time.time(), 'left': set(ips), 'n': len(ips), 'rs': 0, 'done': {}}
+        room_burst(ips, pr, cmd)
+        for ip in ips:
+            WS.setdefault('fix', {})[ip] = time.time()
+        log('barwa %s -> %dK %d%%: %d/%d od razu' % (room, k, dim, cmd.get('burst', 0), len(ips)))
+
+
 def fast_tick():
     """Lekkie, nieblokujące sprawdzenie (25.11): szturchnięcia, ucho z łazienki, ruch -> światło.
     Wołane między wolnymi rzeczami (arkusz, urządzenia), żeby światło w łazience nie czekało na nie."""
@@ -1865,6 +1902,7 @@ def fast_tick():
         http_tick()
         ucho_tick()
         bath_tick()
+        target_tick()
     except Exception as e:
         print('fast', e)
 
@@ -2399,14 +2437,16 @@ def pc_tick():
         m = mins()
         if desk_quiet():
             DESK['t'] = time.time() - 15  # lampa nad biurkiem zapala się z komputerem: sprawdzenie za ok. 5 s
-        if PLAN.get('kitchen_led') and not state.get('asleep') and 240 <= m < sun_min(False):
-            plug_set(PLAN['kitchen_led'], True, 'komputer wlaczony: kuchnia led on')  # tylko w dzień (do zmierzchu)
         mo = state.get('morn')
         if mo and not mo.get('we') and not mo.get('pc'):
             mo = dict(mo)
             mo['pc'] = True
             state['morn'] = mo  # w tygodniu poranne ciepłe światło kończy się z włączeniem komputera
             WS['col'] = 0  # barwa dzienna od razu
+            TGT['t'] = 0
+            target_tick()  # najpierw żarówki (cały salon i kuchnia serią), dopiero potem LED-y (26.11)
+        if PLAN.get('kitchen_led') and not state.get('asleep') and 240 <= m < sun_min(False):
+            plug_set(PLAN['kitchen_led'], True, 'komputer wlaczony: kuchnia led on')  # tylko w dzień (do zmierzchu)
     PC['on'] = on
 
 
