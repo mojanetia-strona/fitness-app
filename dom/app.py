@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.151'
+VERSION = '1.0.153'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -355,12 +355,13 @@ def panel_lights(room, on, k=None, dim=None):
     ips = room_ips(room)
     if not ips:
         return
+    base = 'work' if room in SUB else room
     if on:
-        tk, td = light_target(room)
+        tk, td = light_target(base)
         pr = {'state': True, 'temp': int(k or tk), 'dimming': int(dim or td)}
     else:
         pr = {'state': False}
-    MAN[room] = {'pr': pr, 't': time.time()}
+    MAN[base] = {'pr': pr, 't': time.time()}  # salon albo kuchnia osobno = cały 'work' ręcznie do najbliższego zdarzenia
     cmd = {'room': room, 'on': on, 't0': time.time(), 'left': set(ips), 'n': len(ips), 'rs': 0, 'done': {}}
     want = WS.setdefault('want', {})
     for ip in ips:
@@ -374,7 +375,7 @@ def panel_exec(c, a):
     if c == 'swiatla':
         rooms = ('work', 'bed', 'bath') if a.get('room') == 'all' else (a.get('room'),)
         for r in rooms:
-            if r in ('work', 'bed', 'bath'):
+            if r in ('work', 'bed', 'bath', 'salon', 'kitchen'):
                 panel_lights(r, bool(a.get('on')), a.get('k'), a.get('dim'))
     elif c == 'lampa':
         key = a.get('key')
@@ -437,18 +438,22 @@ def panel_cmds(sync):
 def panel_state():
     """Zwięzły stan domu dla panelu (wysyłany przy synchronizacji, ok. 500 znaków)."""
     def room(r):
-        tot = len(room_ips(r))
-        lit = [x for mac, x in ws_present(120).items() if room_of(mac) == r and x['p'].get('state')]
+        if r in SUB:
+            mine = [x for mac, x in WS['seen'].items() if mac[-4:].lower() in SUB[r]]
+        else:
+            mine = [x for mac, x in WS['seen'].items() if room_of(mac) == r]
+        lit = [x for x in mine if x['t'] and x['p'].get('state')]  # ostatni znany stan (t=0: jeszcze nie odpowiedziała)
         p = lit[0]['p'] if lit else {}
-        return [len(lit), tot, p.get('temp'), p.get('dimming'), 1 if r in MAN else 0]
+        return [len(lit), len(mine), p.get('temp'), p.get('dimming'), 1 if (('work' if r in SUB else r) in MAN) else 0]
     q = state.get('q') or (None, None, None, None)
     st = {
         'v': VERSION, 'a': 1 if state.get('asleep') else 0, 'w': 1 if state.get('away') else 0,
         'mo': 1 if morning_on() else 0, 'nl': 1 if NL.get('on') else 0, 'wl': 1 if state.get('wl') else 0,
         'nw': state.get('no_wake'), 'tout': state.get('tout'),
-        'r': {'work': room('work'), 'bed': room('bed'), 'bath': room('bath')},
+        'r': {'work': room('work'), 'salon': room('salon'), 'kitchen': room('kitchen'), 'bed': room('bed'), 'bath': room('bath')},
         'tg': {'work': light_target('work'), 'bed': light_target('bed')},
-        's': [q[2], state.get('trv_salon')], 'b': [(TCUR.get('bed') or (0, None))[1], state.get('trv_bed')],
+        's': [q[2], state.get('trv_salon') or TTGT.get('salon')],
+        'b': [room_temp('b', None), state.get('trv_bed') or TTGT.get('bed')],  # sypialnia: odczyt z głowicy najwyżej co 5 min
         'rh': q[0], 'pm': q[1], 'co2': q[3], 'm': [k for k in MAN],
     }
     lamps = {}
@@ -687,6 +692,8 @@ ROOMS = {
     'work': ('6534', '5f96', '9544', 'e7ee', '6682', '68fa', '48b0', '677e',   # kuchnia pionowo / poziomo
              '6368', '62e4', '49b4', '64b2', '6410', '5e8c', '66ec', '623a'),  # salon pionowo / poziomo
 }
+# 26.11: tylko dla panelu (ręcznie): salon i kuchnia osobno. Automatyka zawsze steruje całym 'work'.
+SUB = {'kitchen': ROOMS['work'][:8], 'salon': ROOMS['work'][8:]}
 BED_LAMP = 'd3e2'  # lampka za łóżkiem: własne budzenie, barwy nie ruszamy
 
 
@@ -699,6 +706,8 @@ def room_of(mac):
 
 
 def room_ips(room):
+    if room in SUB:
+        return [x['ip'] for mac, x in WS['seen'].items() if mac[-4:].lower() in SUB[room]]
     return [x['ip'] for mac, x in WS['seen'].items() if room_of(mac) == room]
 
 
@@ -1573,6 +1582,7 @@ def boost_off(name):
 
 
 TCUR = {}  # pokój -> (czas, temperatura) z ostatniego odczytu
+TTGT = {}  # głowica -> cel odczytany z głowicy
 
 
 def room_temp(room, q_t):
@@ -1590,7 +1600,10 @@ def room_temp(room, q_t):
         gc.collect()
         r = requests.get('http://%s/rpc/BluTrv.GetRemoteStatus?id=%s' % (gw, tid), timeout=10)
         try:
-            v = r.json()['status']['trv:0']['current_C']
+            tv = r.json()['status']['trv:0']
+            v = tv['current_C']
+            if tv.get('target_C') is not None:
+                TTGT[name] = tv['target_C']  # 26.11: faktyczny cel z głowicy (dla panelu, także po restarcie płytki)
         finally:
             r.close()
         TCUR[name] = (time.time(), v)
@@ -3277,6 +3290,9 @@ def run():
         try:
             force = NOW[0]
             NOW[0] = False
+            if not BOOT_T[1:] and time.time() - BOOT_T[0] > 45:  # 26.11: raz po starcie, gdy żarówki już się zgłosiły (stan dla panelu)
+                BOOT_T.append(1)
+                force = True
             # co 2 min; w oknie typowej pobudki (±1 h, np. 6:00-8:00 przy pobudce o 7:00),
             # dopóki śpię: co 20 s, żeby poranek ruszał od razu po zdjęciu telefonu
             every = 120

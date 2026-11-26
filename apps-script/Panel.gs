@@ -29,6 +29,11 @@ function panelGet_(ss, p) {
   const out = { ok: true };
   const c = p.cmd || p.polecenie;
   if (c) out.cmd = panelCmd_(ss, String(c), p.a || '{}', 'panel');
+  else if (p.fresh === '1') {  // otwarcie panelu: stan starszy niż 30 s → szturchnij płytkę, żeby przysłała świeży
+    const pr = PropertiesService.getScriptProperties();
+    const stAt = Number(pr.getProperty('ESP_STATE_AT') || 0), pk = Number(pr.getProperty('PANEL_POKE_AT') || 0);
+    if (Date.now() - stAt > 30e3 && Date.now() - pk > 20e3) out.poked = panelPoke_();
+  }
   return Object.assign(out, panelState_(ss, p.log === '1'));
 }
 
