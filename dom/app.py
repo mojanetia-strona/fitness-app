@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.148'
+VERSION = '1.0.149'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -327,6 +327,127 @@ def wake_light_start(sync, weekend):
     if am is not None and am - fade < start:
         start = am - fade  # budzik z kalendarza: o godzinie budzika ma być już jasno
     return max(start, 0)
+
+
+# ---------- Panel dom.ldesk.pl (26.11) ----------
+# Ręczne ustawienie z panelu (albo od Claude przez arkusz) ma pierwszeństwo do najbliższego zdarzenia automatyki
+# (lampka nocna, noc, pobudka, wyjście, powrót), które przejmuje sterowanie jak wcześniej.
+MAN = {}
+
+
+def day_key_at(t):
+    tm = time.gmtime(t + 3600 * (1 + (1 if now_local()[3] != time.gmtime(time.time() + 3600)[3] else 0)))
+    return '%04d%02d%02d' % (tm[0], tm[1], tm[2])
+
+
+def man_clear(why=''):
+    if MAN:
+        log('panel: reczne ustawienia koniec (%s)' % why)
+    MAN.clear()
+
+
+def no_wake_today():
+    return state.get('no_wake') == day_key()
+
+
+def panel_lights(room, on, k=None, dim=None):
+    ips = room_ips(room)
+    if not ips:
+        return
+    if on:
+        tk, td = light_target(room)
+        pr = {'state': True, 'temp': int(k or tk), 'dimming': int(dim or td)}
+    else:
+        pr = {'state': False}
+    MAN[room] = {'pr': pr, 't': time.time()}
+    cmd = {'room': room, 'on': on, 't0': time.time(), 'left': set(ips), 'n': len(ips), 'rs': 0, 'done': {}}
+    want = WS.setdefault('want', {})
+    for ip in ips:
+        want[ip] = {'p': pr, 'until': time.time() + 300, 'at': time.time(), 'cmd': cmd}
+    room_burst(ips, pr, cmd)
+    log('panel: swiatla %s %s%s (%d/%d od razu)' % (room, 'on' if on else 'off',
+        (' %dK %d%%' % (pr['temp'], pr['dimming'])) if on else '', cmd.get('burst', 0), len(ips)))
+
+
+def panel_exec(c, a):
+    if c == 'swiatla':
+        rooms = ('work', 'bed', 'bath') if a.get('room') == 'all' else (a.get('room'),)
+        for r in rooms:
+            if r in ('work', 'bed', 'bath'):
+                panel_lights(r, bool(a.get('on')), a.get('k'), a.get('dim'))
+    elif c == 'lampa':
+        key = a.get('key')
+        if key in ('lamp_salon', 'kitchen_led', 'desk_light') and PLAN.get(key):
+            MAN[key] = {'on': bool(a.get('on')), 't': time.time()}
+            plug_set(PLAN[key], bool(a.get('on')), 'panel: %s %s' % (key, 'on' if a.get('on') else 'off'))
+    elif c == 'wszystko_off':
+        for r in ('work', 'bed', 'bath'):
+            panel_lights(r, False)
+        if PLAN.get('wiz_bed'):
+            wiz({'state': False})
+        for key in ('lamp_salon', 'kitchen_led', 'desk_light'):
+            if PLAN.get(key):
+                MAN[key] = {'on': False, 't': time.time()}
+                plug_set(PLAN[key], False, 'panel: %s off' % key)
+    elif c == 'czytanie':
+        for r in ('work', 'bed'):
+            panel_lights(r, False)
+        if PLAN.get('lamp_salon'):
+            MAN['lamp_salon'] = {'on': True, 't': time.time()}
+            plug_set(PLAN['lamp_salon'], True, 'panel: tryb czytania, lampa salon on')
+    elif c == 'temp':
+        name = {'salon': 'salon', 'sypialnia': 'bed', 'bed': 'bed'}.get(a.get('room'))
+        t = float(a.get('t', 0))
+        if name and 10 <= t <= 28:
+            trv_target(name, t)
+            log('panel: grzejnik %s %.1f' % (name, t))
+    elif c == 'budzenie':
+        if a.get('on') is False or a.get('on') == 0 or str(a.get('on')).lower() in ('false', 'off', 'nie', '0'):
+            # najbliższy poranek: dziś, jeśli jeszcze przed południem i przed pobudką, inaczej jutro
+            key = day_key() if (mins() < 720 and state.get('asleep')) else day_key_at(time.time() + 86400)
+            state['no_wake'] = key
+            log('panel: bez budzenia %s (spie do oporu, dzien od wagi albo telefonu)' % key)
+        else:
+            state['no_wake'] = None
+            log('panel: budzenie normalnie')
+    elif c == 'robot':
+        if dev.get('robot'):
+            start = a.get('akcja') == 'start'
+            s_, a_ = PLAN['robot_start' if start else 'robot_dock']
+            dev['robot'].action(s_, a_)
+            if start:
+                state['robot_day'] = day_num()
+            log('panel: robot %s' % ('start sprzatania' if start else 'na stacje'))
+    else:
+        log('panel: nieznane polecenie %s' % c)
+
+
+def panel_cmds(sync):
+    for c in (sync or {}).get('cmds') or []:
+        try:
+            panel_exec(c.get('c'), c.get('a') or {})
+        except Exception as e:
+            log('panel blad %s: %s' % (c.get('c'), e))
+
+
+def panel_state():
+    """Zwięzły stan domu dla panelu (wysyłany przy synchronizacji, ok. 500 znaków)."""
+    def room(r):
+        tot = len(room_ips(r))
+        lit = [x for mac, x in ws_present(120).items() if room_of(mac) == r and x['p'].get('state')]
+        p = lit[0]['p'] if lit else {}
+        return [len(lit), tot, p.get('temp'), p.get('dimming'), 1 if r in MAN else 0]
+    q = state.get('q') or (None, None, None, None)
+    st = {
+        'v': VERSION, 'a': 1 if state.get('asleep') else 0, 'w': 1 if state.get('away') else 0,
+        'mo': 1 if morning_on() else 0, 'nl': 1 if NL.get('on') else 0, 'wl': 1 if state.get('wl') else 0,
+        'nw': state.get('no_wake'), 'tout': state.get('tout'),
+        'r': {'work': room('work'), 'bed': room('bed'), 'bath': room('bath')},
+        'tg': {'work': light_target('work'), 'bed': light_target('bed')},
+        's': [q[2], state.get('trv_salon')], 'b': [(TCUR.get('bed') or (0, None))[1], state.get('trv_bed')],
+        'rh': q[0], 'pm': q[1], 'co2': q[3], 'm': [k for k in MAN],
+    }
+    return json.dumps(st)
 
 
 def remote_cmd(sync):
@@ -674,7 +795,8 @@ def wiz_scan_tick():
         # barwa wg pomieszczenia: poprawiamy tylko świeżo potwierdzoną świecącą żarówkę (sama odpowiedź sprzed ms).
         # Wcześniej płytka wysyłała barwę na podstawie starego stanu i ponownie zapalała żarówki zgaszone w aplikacji.
         p_ = WS['seen'][x['mac']]['p']
-        if PLAN.get('lt_auto', True) and x.get('state') and not wake_hold() and x['mac'][-4:].lower() != BED_LAMP \
+        if PLAN.get('lt_auto', True) and x.get('state') and not wake_hold() and room_of(x['mac']) not in MAN \
+                and x['mac'][-4:].lower() != BED_LAMP \
                 and addr[0] != PLAN.get('wiz_bed') and t - WS.setdefault('fix', {}).get(addr[0], 0) > 20:
             k, dim = light_target(room_of(x['mac']) or 'work')
             if p_.get('sceneId') or abs((p_.get('temp') or 0) - k) >= 100 or abs((p_.get('dimming') or 0) - dim) >= 5:
@@ -683,7 +805,7 @@ def wiz_scan_tick():
         # strażnik: gdy mnie nie ma albo śpię, żadna żarówka nie ma prawa świecić (poza łazienką z czujnika w nocy).
         # Działa przy każdej odpowiedzi żarówki, więc zgubione polecenie „zgaś” nie zostawi światła na cały dzień.
         rm = room_of(x['mac'])
-        if x.get('state') and (state.get('away') or (state.get('asleep') and rm != 'bath' and not wake_hold())) \
+        if x.get('state') and rm not in MAN and (state.get('away') or (state.get('asleep') and rm != 'bath' and not wake_hold())) \
                 and t - WS.setdefault('guard', {}).get(addr[0], 0) > 10:
             WS['guard'][addr[0]] = t
             ws_send(addr[0], {'state': False})
@@ -885,6 +1007,7 @@ def room_set(room, on, why=''):
     ips = room_ips(room)
     if not ips:
         return
+    MAN.pop(room, None)  # automatyka przejmuje pokój ustawiony ręcznie z panelu
     want = WS.setdefault('want', {})
     if on:
         k, dim = light_target(room)
@@ -965,13 +1088,14 @@ def bath_tick():
             for ip in ips[1:]:
                 ws_send(ip, {'state': False})
         if not MOT['on']:
+            MAN.pop('bath', None)  # nowe wejście: łazienka znów na czujniku
             MOT['on'] = True
             MOT['on_at'] = time.time()
             log('lazienka ruch: on %sK %s%%' % (k, dim))
             if night:
                 state['night_walks'] = (state.get('night_walks') or 0) + 1  # nocne wyjścia do łazienki (jakość snu)
                 log('lazienka w nocy (%d. raz tej nocy)' % state['night_walks'])
-    elif time.time() - MOT.get('lt', MOT['t']) > bath_timeout(night) and time.time() - MOT.get('chk', 0) > 20 \
+    elif 'bath' not in MAN and time.time() - MOT.get('lt', MOT['t']) > bath_timeout(night) and time.time() - MOT.get('chk', 0) > 20 \
             and (not GW_MOT['val'] or time.time() - MOT.get('lt', MOT['t']) > PLAN.get('bath_stuck', 1200)):
         # brak ruchu: gasimy, także gdy światło zapaliło się inaczej (klawisz, aplikacja).
         # Czujnik przy ciągłym ruchu nic nie nadaje (stan „ruch” trwa), a koniec ruchu zgłasza osobną wiadomością.
@@ -1234,6 +1358,8 @@ def nl_tick():
 
 def nl_event(on):
     m = mins()
+    if m >= PLAN['night_from'] or m < 240:
+        man_clear('lampka nocna')
     night = m >= PLAN['night_from'] or m < 240
     if not night:
         log('lampka nocna %s (dzien, nic nie robie)' % ('on' if on else 'off'))
@@ -1886,7 +2012,7 @@ def target_tick():
         return
     lit_all = [(mac, x) for mac, x in ws_present().items() if x['p'].get('state')]
     for room in ('work', 'bed', 'bath'):
-        if room != 'bath' and state.get('asleep'):
+        if room in MAN or (room != 'bath' and state.get('asleep')):
             continue
         k, dim = light_target(room)
         prev = TGT['last'].get(room)
@@ -2422,7 +2548,7 @@ def desk_tick():
         if PLAN.get('kitchen_led') and light_on(PLAN['kitchen_led']):
             plug_set(PLAN['kitchen_led'], False, '18:00 wyciszenie: kuchnia led off')
     ip = PLAN.get('desk_light')
-    if ip and light_on(ip):
+    if ip and not (MAN.get('desk_light') or {}).get('on') and light_on(ip):
         plug_set(ip, False, 'lampa biurko off (po 18:00 nie swieci do rana)')
 
 
@@ -2656,6 +2782,7 @@ def tick_rules(sync, q):
         if not first and new == prev:
             pass  # drugi powrót (lokalizacja + Wi-Fi) albo powtórzone wyjście: nic nowego
         elif not first:
+            man_clear('wyjscie' if new else 'powrot')
             for n in list(BOOST):
                 boost_off(n)
             if state['away']:
@@ -2743,7 +2870,7 @@ def tick_rules(sync, q):
             curtains('close', 'noc')
 
     # --- rano, przed pobudką (tylko gdy telefon nadal leży = jestem w domu) ---
-    if asleep and m < 720:
+    if asleep and m < 720 and not no_wake_today():  # panel: „bez budzenia” = śpię do oporu, nic przed wstaniem
         wm = wake_min(sync, weekend)
         am = wake_alarm_min(sync)
         we = min(wm, am) if am is not None else wm  # wczesny termin z kalendarza: ciepło na budzik
@@ -2791,6 +2918,9 @@ def tick_rules(sync, q):
     # --- wstałem: telefon zdjęty rano ---
     if was and not asleep and ph and ph.get('e') == 'up':
         log('rano: telefon zdjety')
+        man_clear('pobudka')
+        if state.get('no_wake') == day_key():
+            state['no_wake'] = None
         state['ln_t'] = None
         state['nl_eve'] = None
         state['morn'] = {'t0': time.time(), 'we': is_weekend()}
@@ -3141,10 +3271,16 @@ def run():
                 last_sync = time.time()
                 fast_tick()  # ruch w łazience obsłużony przed kilkusekundową synchronizacją z arkuszem
                 try:
-                    sync = gas({'pc': 'on'} if PC['evt'] else {})
+                    prm = {'pc': 'on'} if PC['evt'] else {}
+                    try:
+                        prm['st'] = panel_state()
+                    except Exception as e:
+                        print('panel st', e)
+                    sync = gas(prm)
                     PC['evt'] = False
                     state['sync_fail'] = 0
                     remote_cmd(sync)
+                    panel_cmds(sync)
                 except Exception as e:
                     print('sync err', e)
                     # brak łączności z arkuszem przez ok. 10 min: zapisz przyczynę i zrestartuj (płytka sama wraca do pracy)
