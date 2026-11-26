@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.142'
+VERSION = '1.0.143'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -2692,6 +2692,14 @@ def tick_rules(sync, q):
                 state['wl'] = {'t0': time.time() - (m - ws) * 60}
                 state['wl_at'] = 0
                 curtains('open', 'budzenie')  # cicho, razem z rozjaśnianiem lampki
+                # 26.11: powietrze rusza już z budzeniem (zaraz wstaję), nie dopiero po wstaniu
+                dev_set('salon_hum', 'on', True)
+                if dev_set('salon_hum', 'sh_mode', 0, 'budzenie: salon nawilzacz tryb dzienny'):
+                    dev_set('salon_hum', 'sh_target', PLAN['rh_target'])
+                dev_set('salon_pur', 'on', True)
+                dev_set('salon_pur', 'sp_mode', 0, 'budzenie: salon oczyszczacz tryb dzienny')
+                if weekend:
+                    hum_on('bed_hum', 'b', 'budzenie: sypialnia nawilzacz on (weekend)')
 
     if was and not asleep:
         for room in ('s', 'b'):
