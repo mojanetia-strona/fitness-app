@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.157'
+VERSION = '1.0.158'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -752,7 +752,12 @@ def light_target(room='work', m=None):
         if not dark:
             return 5000, 100
         # po zmierzchu ciepło i przygaszone (45%); od wieczoru dokładnie jak pokoje: 40% -> 10% do 21:00
-        return 2700, (eve_dim(m, ef, PLAN.get('eve_dim', 40)) if (m >= ef - 60 or m < 240) else 45)  # od 18:00 (godzina przed wieczorem) 40%
+        if m >= ef or m < 240:
+            return 2700, eve_dim(m, ef, PLAN.get('eve_dim', 40))  # wieczór: dokładnie jak pokoje (40% -> 10% do 21:00)
+        if m >= ef - 60:  # 18:00-19:00: równo z pokojami (100% -> 40%), ale nigdy jaśniej niż 45%
+            p_ = (m - (ef - 60)) / 60.0
+            return 2700, min(45, int(100 - (100 - PLAN.get('eve_dim', 40)) * p_ + 0.5))
+        return 2700, 45
     # 26.11: barwa wieczoru od 19:00, ale nie wcześniej niż 2 h po zachodzie (latem zachód ok. 21:00), żeby nie było skoku;
     # ostatnia godzina przed tym momentem: płynne przejście do 2700 K 40%
     eve = dark and (state.get('eve_ret') == day_key() or m >= ef or m < 240)
@@ -1115,6 +1120,14 @@ def bath_tick():
             MOT['rs_at'] = time.time()
             MOT['rs_log'] = False
         k, dim = light_target('bath')
+        mb = (MAN.get('bath') or {}).get('pr') or {}
+        mw = (MAN.get('work') or {}).get('pr') or {}
+        if mb.get('state') and any(x['p'].get('state') for mac, x in WS['seen'].items() if room_of(mac) == 'bath'):
+            # 26.11: łazienka ustawiona ręcznie i wciąż świeci: ruch nie przywraca automatu (było: 15% z panelu -> 45%)
+            k, dim = mb.get('temp', k), mb.get('dimming', dim)
+        elif mw.get('state') and mw.get('dimming') and k <= 3000:
+            # wieczorem łazienka nie jaśniejsza niż ręcznie przyciemniony salon
+            dim = min(dim, mw['dimming'])
         use = ips[:1] if (night or nl_eve_on()) else ips
         # wszystkie naraz szybką serią z potwierdzeniem (25.11), zamiast po kolei z czekaniem na każdą
         pr = {'state': True, 'temp': k, 'dimming': dim}
