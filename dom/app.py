@@ -1878,9 +1878,12 @@ def target_tick():
             continue
         k, dim = light_target(room)
         prev = TGT['last'].get(room)
-        TGT['last'][room] = (k, dim)
-        if prev is None or prev == (k, dim):
+        if prev is None:
+            TGT['last'][room] = (k, dim)
             continue
+        if abs(prev[0] - k) < 100 and abs(prev[1] - dim) < 5:
+            continue  # drobne kroki (np. płynne przejście po zachodzie) dokańcza zwykła korekta
+        TGT['last'][room] = (k, dim)
         ips = [x['ip'] for mac, x in lit_all if room_of(mac) == room and mac[-4:].lower() != BED_LAMP
                and x['ip'] != PLAN.get('wiz_bed')]
         if room == 'bath' and (state.get('asleep') or nl_eve_on()):
