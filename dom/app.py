@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.140'
+VERSION = '1.0.141'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -1226,6 +1226,8 @@ def nl_event(on):
     if state.get('asleep'):
         if on:
             log('lampka nocna on w nocy (noc trwa)')
+            if PLAN.get('lamp_salon'):  # 26.11: lampa za kanapą nie świeci, gdy noc już trwa
+                plug_set(PLAN['lamp_salon'], False, 'lampa salon off (noc trwa)')
             return
         # ponowne zgaszenie w nocy: nowa pora zaśnięcia (statystyki snu i 8 h do budzenia światłem)
         state['ln_t'] = time.time()
@@ -1255,6 +1257,8 @@ def nl_event(on):
                 wiz({'state': False})
         if state.get('cur_state') != 'close':
             curtains('close', 'lampka nocna', quiet=False)
+        # 26.11: w trybie czytania sypialnia zaczyna się powoli wychładzać
+        trv_target('bed', PLAN.get('bed_read', 21.0))
         # salon cicho już w trybie czytania (jak w nocy)
         dev_set('salon_hum', 'sh_mode', 1, 'salon nawilzacz tryb nocny (czytanie)')
         dev_set('salon_pur', 'sp_mode', 3, 'salon oczyszczacz tryb nocny (czytanie)')
@@ -1297,7 +1301,8 @@ def wake_ceiling(p):
     p = max(0.0, min(1.0, p))
     dim = int(10 + 90 * p ** 2.5 + 0.5)
     k = (2700 + int(800 * p ** 1.5)) // 100 * 100
-    for ip in room_ips('bed'):
+    # 26.11: rozjaśnia się całe mieszkanie (sypialnia, salon, kuchnia), łazienka zostaje na czujniku
+    for ip in list(room_ips('bed')) + list(room_ips('work')):
         ws_send(ip, {'state': True, 'temp': k, 'dimming': dim})
 
 
@@ -1319,7 +1324,7 @@ def wake_light_tick():
             wl = dict(wl)
             wl['half'] = 1
             state['wl'] = wl
-            log('budzenie swiatlem: polowa (sufit, %d zarowek)' % len(room_ips('bed')))
+            log('budzenie swiatlem: polowa (sypialnia, salon, kuchnia: %d zarowek)' % (len(room_ips('bed')) + len(room_ips('work'))))
         return
     if p >= 1:
         if wiz(wake_pilot(1.0)) is None and 'Invalid params' in str(state.get('wiz_err')):
@@ -2293,6 +2298,14 @@ def scale_tick():
         res = gas({'kg': '%.2f' % kg})
         if isinstance(res, dict) and res.get('pobudka_waga'):
             NOW[0] = True  # pobudka z wagi: od razu synchronizacja i reguły, bez czekania na kolejny cykl
+            bips = list(room_ips('bath'))
+            if bips:  # 26.11: łazienka od razu pełne poranne światło, reszta poranka po synchronizacji
+                pr = {'state': True, 'temp': PLAN.get('bath_morn_k', 6000), 'dimming': 100}
+                bc = {'room': 'bath', 'on': True, 't0': time.time(), 'left': set(bips), 'n': len(bips), 'rs': 0, 'done': {}}
+                room_burst(bips, pr, bc)
+                for ip in bips:  # do czasu synchronizacji (pobudka) nie poprawiamy barwy z powrotem na nocną
+                    WS.setdefault('fix', {})[ip] = time.time() + 40
+                log('waga: pobudka, lazienka od razu pelne swiatlo')
         scale['last_kg'] = kg
         scale['last_sent'] = time.time()
         log('waga %.2f kg zapisana' % kg)
