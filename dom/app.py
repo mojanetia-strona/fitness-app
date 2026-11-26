@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.147'
+VERSION = '1.0.148'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -587,10 +587,16 @@ def light_target(room='work', m=None):
             return 6000, 100       # rano: białe, jasne, rozbudza
         return (2700, 45) if dark else (5000, 100)  # po zmierzchu ciepło i przygaszone, relaksująco
     eve = dark and (state.get('eve_ret') == day_key() or m >= PLAN.get('eve_from', 1140) or m < 240)
+    ef = PLAN.get('eve_from', 1140)
+    pre = max(0.0, min(1.0, (m - (ef - 60)) / 60.0)) if dark and ef - 60 <= m < ef else 0.0  # 18:00-19:00: płynnie do wieczoru
     if room == 'bed':
         if eve:
             return PLAN.get('eve_k', 2700), PLAN.get('eve_dim', 40)  # tryb wieczór: jak salon i kuchnia
-        return 2700, (60 if dark else 100)  # zawsze ciepło, po zmierzchu przygaszone
+        if dark:  # 26.11: płynnie, bez skoków: po zmierzchu przez 2 h 100% -> 60%, 18:00-19:00 dalej do 40%
+            d = 100 - 40 * min(1.0, ((m - ss) % 1440) / 120.0)
+            d = d - (d - PLAN.get('eve_dim', 40)) * pre
+            return 2700, int(d + 0.5)
+        return 2700, 100  # zawsze ciepło
     # salon + kuchnia
     if state.get('asleep'):
         return 2700, 50
@@ -600,8 +606,12 @@ def light_target(room='work', m=None):
         # tryb wieczór: po zmierzchu i od 19:00 (albo po powrocie po zmroku): klimatycznie, delikatnie
         return PLAN.get('eve_k', 2700), PLAN.get('eve_dim', 40)
     if dark:
-        k = 5000 - 2000 * min(1.0, ((m - ss) % 1440) / 120.0)  # od zmierzchu przez 2 h do 3000 K
-        return int(k) // 100 * 100, 100
+        k = 5000 - 2000 * min(1.0, ((m - ss) % 1440) / 120.0)  # od zmierzchu przez 2 h do 3000 K, jasność 100%
+        d = 100.0
+        if pre:  # 26.11: 18:00-19:00 płynnie do trybu wieczór (2700 K 40%), zamiast skoku o 19:00
+            k = k - (k - PLAN.get('eve_k', 2700)) * pre
+            d = 100 - (100 - PLAN.get('eve_dim', 40)) * pre
+        return int(k) // 100 * 100, int(d + 0.5)
     return 5000, 100
 
 
