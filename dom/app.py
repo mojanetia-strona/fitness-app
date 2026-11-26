@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.154'
+VERSION = '1.0.155'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -723,11 +723,24 @@ def morning_on():
     return age < 3 * 3600 and not mo.get('pc')
 
 
+def eve_dim(m, ef, start):
+    """26.11: wieczór. Barwa stała (2700 K), jasność płynnie spada od początku wieczoru (zimą 19:00) do 21:00 na minimum
+    WiZ (10%) i tak zostaje do nocy, zgaszenia albo trybu czytania. start = jasność na początku (pokoje 40%, łazienka 45%)."""
+    lo = PLAN.get('eve_dim_min', 10)
+    end = max(PLAN.get('eve_dim_end', 1260), ef + 60)
+    if m < 240 or m >= end:
+        return lo
+    if m <= ef:
+        return start
+    return int(start - (start - lo) * (m - ef) / float(end - ef) + 0.5)
+
+
 def light_target(room='work', m=None):
     """Barwa (K) i jasność (%) dla pomieszczenia teraz. Ustalone z Łukaszem 23.11."""
     m = mins() if m is None else m
     ss = sun_min(False)
     dark = m >= ss or m < 240  # po zachodzie słońca (zmierzch) do 4:00
+    ef = max(PLAN.get('eve_from', 1140), ss + 120) if ss + 120 < 1440 else PLAN.get('eve_from', 1140)
     if room == 'bath':
         if state.get('asleep') or nl_eve_on():
             return 2700, 10        # noc: jedna żarówka, minimum WiZ (10%), ciepło
@@ -736,15 +749,14 @@ def light_target(room='work', m=None):
             if time.time() - state['morn']['t0'] < PLAN.get('bath_soft_s', 600):
                 return PLAN.get('morn_k', 2800), PLAN.get('morn_dim', 50)
             return 6000, 100       # rano: białe, jasne, rozbudza
-        return (2700, 45) if dark else (5000, 100)  # po zmierzchu ciepło i przygaszone, relaksująco
+        return (2700, eve_dim(m, ef, 45)) if dark else (5000, 100)  # po zmierzchu ciepło i przygaszone; 19-21 coraz ciemniej
     # 26.11: barwa wieczoru od 19:00, ale nie wcześniej niż 2 h po zachodzie (latem zachód ok. 21:00), żeby nie było skoku;
     # ostatnia godzina przed tym momentem: płynne przejście do 2700 K 40%
-    ef = max(PLAN.get('eve_from', 1140), ss + 120) if ss + 120 < 1440 else PLAN.get('eve_from', 1140)
     eve = dark and (state.get('eve_ret') == day_key() or m >= ef or m < 240)
     pre = max(0.0, min(1.0, (m - (ef - 60)) / 60.0)) if dark and ef - 60 <= m < ef else 0.0
     if room == 'bed':
         if eve:
-            return PLAN.get('eve_k', 2700), PLAN.get('eve_dim', 40)  # tryb wieczór: jak salon i kuchnia
+            return PLAN.get('eve_k', 2700), eve_dim(m, ef, PLAN.get('eve_dim', 40))  # tryb wieczór: jak salon i kuchnia
         if dark:  # 26.11: płynnie, bez skoków: po zmierzchu przez 2 h 100% -> 60%, 18:00-19:00 dalej do 40%
             d = 100 - 40 * min(1.0, ((m - ss) % 1440) / 120.0)
             d = d - (d - PLAN.get('eve_dim', 40)) * pre
@@ -757,7 +769,7 @@ def light_target(room='work', m=None):
         return PLAN.get('morn_k', 2800), PLAN.get('morn_dim', 50)  # rano (25.11): ciepło, przygaszone
     if dark and (state.get('eve_ret') == day_key() or m >= PLAN.get('eve_from', 1140) or m < 240):
         # tryb wieczór: po zmierzchu i od 19:00 (albo po powrocie po zmroku): klimatycznie, delikatnie
-        return PLAN.get('eve_k', 2700), PLAN.get('eve_dim', 40)
+        return PLAN.get('eve_k', 2700), eve_dim(m, ef, PLAN.get('eve_dim', 40))
     if dark:
         k = 5000 - 2000 * min(1.0, ((m - ss) % 1440) / 120.0)  # od zmierzchu przez 2 h do 3000 K, jasność 100%
         d = 100.0
