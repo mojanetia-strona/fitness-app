@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.150'
+VERSION = '1.0.151'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -241,6 +241,7 @@ def plug_set(ip, on, label):
             gc.collect()
             r = requests.get('http://%s/rpc/Switch.Set?id=0&on=%s' % (ip, 'true' if on else 'false'), timeout=3)
             r.close()
+            LSW[ip] = (bool(on), time.time())
             log(label)
             return True
         except Exception as e:
@@ -450,6 +451,17 @@ def panel_state():
         's': [q[2], state.get('trv_salon')], 'b': [(TCUR.get('bed') or (0, None))[1], state.get('trv_bed')],
         'rh': q[0], 'pm': q[1], 'co2': q[3], 'm': [k for k in MAN],
     }
+    lamps = {}
+    for key in ('lamp_salon', 'kitchen_led', 'desk_light'):
+        ip = PLAN.get(key)
+        if not ip:
+            continue
+        c = LSW.get(ip)
+        if not c or time.time() - c[1] > 120:  # starszy niż 2 min: dopytaj (zmiana z Google Home albo ręczna)
+            light_on(ip)
+            c = LSW.get(ip)
+        lamps[key] = (1 if c[0] else 0) if c else None
+    st['l'] = lamps
     return json.dumps(st)
 
 
@@ -533,13 +545,18 @@ def wiz_quick(ip):
             s.close()
 
 
+LSW = {}  # 26.11: ostatni znany stan gniazdek/modułów Shelly z lampami (ip -> (on, kiedy)) dla panelu
+
+
 def light_on(ip):
     """Czy gniazdko / moduł Shelly z lampą jest włączone (lokalne RPC). Brak odpowiedzi = nie."""
     try:
         gc.collect()
         r = requests.get('http://%s/rpc/Switch.GetStatus?id=0' % ip, timeout=3)
         try:
-            return bool(r.json().get('output'))
+            v = bool(r.json().get('output'))
+            LSW[ip] = (v, time.time())
+            return v
         finally:
             r.close()
     except Exception:
