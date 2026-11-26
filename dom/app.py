@@ -659,7 +659,7 @@ def wiz_scan_tick():
         # barwa wg pomieszczenia: poprawiamy tylko świeżo potwierdzoną świecącą żarówkę (sama odpowiedź sprzed ms).
         # Wcześniej płytka wysyłała barwę na podstawie starego stanu i ponownie zapalała żarówki zgaszone w aplikacji.
         p_ = WS['seen'][x['mac']]['p']
-        if PLAN.get('lt_auto', True) and x.get('state') and not state.get('wl') and x['mac'][-4:].lower() != BED_LAMP \
+        if PLAN.get('lt_auto', True) and x.get('state') and not wake_hold() and x['mac'][-4:].lower() != BED_LAMP \
                 and addr[0] != PLAN.get('wiz_bed') and t - WS.setdefault('fix', {}).get(addr[0], 0) > 20:
             k, dim = light_target(room_of(x['mac']) or 'work')
             if p_.get('sceneId') or abs((p_.get('temp') or 0) - k) >= 100 or abs((p_.get('dimming') or 0) - dim) >= 5:
@@ -668,7 +668,7 @@ def wiz_scan_tick():
         # strażnik: gdy mnie nie ma albo śpię, żadna żarówka nie ma prawa świecić (poza łazienką z czujnika w nocy).
         # Działa przy każdej odpowiedzi żarówki, więc zgubione polecenie „zgaś” nie zostawi światła na cały dzień.
         rm = room_of(x['mac'])
-        if x.get('state') and (state.get('away') or (state.get('asleep') and rm != 'bath' and not state.get('wl'))) \
+        if x.get('state') and (state.get('away') or (state.get('asleep') and rm != 'bath' and not wake_hold())) \
                 and t - WS.setdefault('guard', {}).get(addr[0], 0) > 10:
             WS['guard'][addr[0]] = t
             ws_send(addr[0], {'state': False})
@@ -1292,6 +1292,11 @@ def night_lamp_guard():
     if r and (r.get('result') or {}).get('state'):
         if wiz({'state': False}) is not None:
             log('noc: lampka sypialnia zapalila sie po zaniku pradu, gasze')
+
+
+def wake_hold():
+    """Budzenie trwa albo dobiegło końca, a ja jeszcze nie wstałem: światła z budzenia zostają (bez strażnika i korekt)."""
+    return bool(state.get('wl')) or (state.get('wl_done') == time.localtime()[2] and bool(state.get('asleep')) and mins() < 720)
 
 
 def wake_ceiling(p):
