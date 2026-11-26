@@ -343,6 +343,7 @@ function doGet(e) {
   if (p.action === 'gym') return json_(gymEvent_(ss, p.e, p.g));
   if (p.action === 'away') return json_(awayEvent_(ss, p.e));
   if (p.action === 'esp') { PropertiesService.getScriptProperties().setProperty('ESP_LAST', String(Date.now())); return json_(espSync_(ss, p)); } // strażnik: ostatnie zgłoszenie płytki
+  if (p.action === 'panel') return json_(panelGet_(ss, p)); // panel domu dom.ldesk.pl (Panel.gs)
   if (p.action === 'ean') return json_(eanLookup_(ss, p.code)); // test z przeglądarki
   if (p.action === 'diet') return json_(Object.assign({ ok: true }, dietRange_(ss, p.from || '', p.to || ''), { gym: gymRecent_(ss) }));
   return json_({ ok: true, name: ss.getName() });
@@ -993,6 +994,7 @@ function espSync_(ss, p) {
   // ostatnie wejście na siłownię (robot rusza od razu, bez czekania 30 min)
   try { const g = gymRecent_(ss).filter(x => x.e === 'in').pop(); if (g) out.gym = { t: Utilities.formatDate(new Date(g.t), TZ, "yyyy-MM-dd'T'HH:mm:ss") }; } catch (e) { }
   try { const tz = outdoorTemp_(); if (tz !== null) out.tout = tz; } catch (e) { } // temperatura na zewnątrz (26.11)
+  try { Object.assign(out, espPanel_(ss, p)); } catch (e) { } // panel domu: stan płytki i polecenia (Panel.gs)
   // jednorazowe polecenie dla płytki (np. z funkcji testBudzenia), oddawane przy najbliższej synchronizacji
   const pr = PropertiesService.getScriptProperties(), cmd = pr.getProperty('ESP_CMD');
   if (cmd) { out.cmd = cmd; pr.deleteProperty('ESP_CMD'); }
