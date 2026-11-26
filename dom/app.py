@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.153'
+VERSION = '1.0.154'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -452,7 +452,8 @@ def panel_state():
         'nw': state.get('no_wake'), 'tout': state.get('tout'),
         'r': {'work': room('work'), 'salon': room('salon'), 'kitchen': room('kitchen'), 'bed': room('bed'), 'bath': room('bath')},
         'tg': {'work': light_target('work'), 'bed': light_target('bed')},
-        's': [q[2], state.get('trv_salon') or TTGT.get('salon')],
+        's': [q[2] if q[2] is not None else room_temp('s', None),  # salon: Qingping, a do jego pierwszego odczytu głowica
+              state.get('trv_salon') or TTGT.get('salon') or (room_temp('s', None) and TTGT.get('salon'))],
         'b': [room_temp('b', None), state.get('trv_bed') or TTGT.get('bed')],  # sypialnia: odczyt z głowicy najwyżej co 5 min
         'rh': q[0], 'pm': q[1], 'co2': q[3], 'm': [k for k in MAN],
     }
