@@ -992,11 +992,25 @@ function espSync_(ss, p) {
   try { const aw = PropertiesService.getScriptProperties().getProperty('AWAY_LAST'); if (aw) out.away = JSON.parse(aw); } catch (e) { }
   // ostatnie wejście na siłownię (robot rusza od razu, bez czekania 30 min)
   try { const g = gymRecent_(ss).filter(x => x.e === 'in').pop(); if (g) out.gym = { t: Utilities.formatDate(new Date(g.t), TZ, "yyyy-MM-dd'T'HH:mm:ss") }; } catch (e) { }
+  try { const tz = outdoorTemp_(); if (tz !== null) out.tout = tz; } catch (e) { } // temperatura na zewnątrz (26.11)
   // jednorazowe polecenie dla płytki (np. z funkcji testBudzenia), oddawane przy najbliższej synchronizacji
   const pr = PropertiesService.getScriptProperties(), cmd = pr.getProperty('ESP_CMD');
   if (cmd) { out.cmd = cmd; pr.deleteProperty('ESP_CMD'); }
   return out;
 }
+// Temperatura na zewnątrz w Łodzi (Open-Meteo, darmowe, bez konta), pamiętana 30 min, żeby nie pytać przy każdej synchronizacji.
+function outdoorTemp_() {
+  const c = CacheService.getScriptCache(), hit = c.get('TOUT');
+  if (hit !== null) return hit === '' ? null : Number(hit);
+  let t = null;
+  try {
+    const r = UrlFetchApp.fetch('https://api.open-meteo.com/v1/forecast?latitude=51.79&longitude=19.44&current=temperature_2m&timezone=Europe%2FWarsaw', { muteHttpExceptions: true });
+    if (r.getResponseCode() === 200) t = Math.round(JSON.parse(r.getContentText()).current.temperature_2m * 10) / 10;
+  } catch (e) { }
+  c.put('TOUT', t === null ? '' : String(t), t === null ? 300 : 1800);
+  return t;
+}
+
 // Uruchom z edytora: płytka przy najbliższej synchronizacji (do 2 min) odpali skrócone (3 min) budzenie światłem.
 function testBudzenia() { PropertiesService.getScriptProperties().setProperty('ESP_CMD', 'wake_test'); }
 // Uruchom z edytora: płytka sprawdzi, które ustawienia przyjmuje żarówka w sypialni (wynik w zakładce Dom).

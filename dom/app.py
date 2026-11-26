@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.145'
+VERSION = '1.0.146'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -1438,9 +1438,20 @@ def room_temp(room, q_t):
         return c[1] if c else None
 
 
+def tout_band():
+    """Pasmo temperatury na zewnątrz (z arkusza, Open-Meteo): mróz / zimno / łagodnie. None = brak danych."""
+    t = state.get('tout')
+    if t is None:
+        return None
+    return 'mroz' if t <= 0 else ('zimno' if t <= 6 else 'lagodnie')
+
+
 def heat_lead(room, cur, target):
-    # ile minut przed pobudką zacząć, żeby na pobudkę było ciepło (tempo nagrzewania uczone co rano)
-    rate = state.get('rate_' + room) or PLAN['heat_rate']
+    # ile minut przed pobudką zacząć, żeby na pobudkę było ciepło (tempo nagrzewania uczone co rano;
+    # od 26.11 osobno dla mrozu, zimna i łagodnej pogody, a gdy pasmo jeszcze nieznane: tempo ogólne)
+    b = tout_band()
+    rate = (state.get('rates_' + room) or {}).get(b) if b else None
+    rate = rate or state.get('rate_' + room) or PLAN['heat_rate']
     if cur is None:
         return PLAN['salon_heat_pre_min']
     need = max(0.0, target - cur) / rate * 60 + PLAN['pre_margin']
@@ -1463,7 +1474,16 @@ def heat_learn(room, cur, done):
     old = state.get('rate_' + room) or PLAN['heat_rate']
     new = round(0.6 * old + 0.4 * rate, 2)
     state['rate_' + room] = new
-    log('nagrzewanie %s: %.1f -> %.1f w %d min (%.1f C/h), tempo %.2f' % (ROOM_NAME[room], h['T0'], cur, hours * 60, rate, new))
+    b = h.get('band')
+    bn = None
+    if b:
+        rs = dict(state.get('rates_' + room) or {})
+        ob = rs.get(b) or new
+        bn = round(0.6 * ob + 0.4 * rate, 2)
+        rs[b] = bn
+        state['rates_' + room] = rs
+    log('nagrzewanie %s: %.1f -> %.1f w %d min (%.1f C/h), tempo %.2f%s' % (ROOM_NAME[room], h['T0'], cur, hours * 60, rate, new,
+        (', na zewnatrz %s (%s, tempo %.2f)' % (h.get('tout'), b, bn)) if b else ''))
 
 
 def boost_tick(asleep, m):
@@ -2425,7 +2445,7 @@ def day_key():
 
 SAVE_KEYS = ('eve_ret', 'ret18', 'morn', 'night_walks', 'asleep', 'bed_off_at', 'bed_eve', 'night_on', 'bed_pause', 'air', 'wl', 'sleep_at', 'robot_ev', 'robot_day', 'wiz_lvl',
              'cur_want', 'cur_why', 'cur_state', 'cur_day', 'boost_day', 'away_ev', 'away',
-             'rate_s', 'rate_b', 'heat_s', 'heat_b', 'ln_t', 'nl_seen', 'nl_eve', 'cozy')
+             'rate_s', 'rate_b', 'heat_s', 'heat_b', 'ln_t', 'nl_seen', 'nl_eve', 'cozy', 'rates_s', 'rates_b', 'tout')
 
 
 def day_num():
@@ -2514,6 +2534,8 @@ def tick_rules(sync, q):
     m = mins()
     weekend = is_weekend()
     ph = (sync or {}).get('phone')
+    if (sync or {}).get('tout') is not None:
+        state['tout'] = sync['tout']  # temperatura na zewnątrz (Open-Meteo przez arkusz)
     was = state.get('asleep')
     # bez odpowiedzi z arkusza nie zgadujemy: zostaje poprzedni stan (inaczej po restarcie noc/pobudka odpalałyby się drugi raz)
     asleep = phone_asleep(ph) if sync else bool(was)
@@ -2674,14 +2696,15 @@ def tick_rules(sync, q):
             if state.get('once_' + ok) == day_key() or m < we - PLAN['pre_max']:
                 continue
             cur = room_temp(room, t)
-            lead = heat_lead(room, cur, PLAN[key])
+            # 26.11: salon grzeje na 25° (szybciej), ale start liczony pod komfort na pobudkę (23°), nie pod 25°
+            lead = heat_lead(room, cur, PLAN['salon_day'] if room == 's' else PLAN[key])
             if m >= we - lead and once(ok):
                 log('przed pobudka: %s %s boost, teraz %s, start %d min przed %d:%02d%s' % (
                     ROOM_NAME[room], PLAN[key], None if cur is None else round(cur, 1), lead, we // 60, we % 60, ' (budzik)' if we != wm else ''))
                 trv_target(name, PLAN[key])
                 state['boost_day'] = day_key()
                 if cur is not None:
-                    state['heat_' + room] = {'t0': time.time(), 'T0': cur, 'tgt': PLAN[key]}
+                    state['heat_' + room] = {'t0': time.time(), 'T0': cur, 'tgt': PLAN[key], 'tout': state.get('tout'), 'band': tout_band()}
         for room in ('s', 'b'):
             if state.get('heat_' + room):
                 heat_learn(room, room_temp(room, t), False)
