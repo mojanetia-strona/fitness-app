@@ -1226,13 +1226,15 @@ def nl_event(on):
     if state.get('asleep'):
         if on:
             log('lampka nocna on w nocy (noc trwa)')
-            if PLAN.get('lamp_salon'):  # 26.11: lampa za kanapą nie świeci, gdy noc już trwa
-                plug_set(PLAN['lamp_salon'], False, 'lampa salon off (noc trwa)')
+            if PLAN.get('lamp_salon'):  # 26.11: lampka w nocy = coś mi się przypomniało, idę do salonu: lampa za kanapą
+                plug_set(PLAN['lamp_salon'], True, 'lampa salon on (lampka w nocy)')
             return
         # ponowne zgaszenie w nocy: nowa pora zaśnięcia (statystyki snu i 8 h do budzenia światłem)
         state['ln_t'] = time.time()
         state['sleep_at'] = m
         log('lampka nocna off ponownie: nowa pora zasniecia')
+        if PLAN.get('lamp_salon'):
+            plug_set(PLAN['lamp_salon'], False, 'lampa salon off (lampka zgaszona)')
         try:
             gas({'e': 'down'}, False, 'phone')
         except Exception as e:
