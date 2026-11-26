@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.156'
+VERSION = '1.0.157'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -752,7 +752,7 @@ def light_target(room='work', m=None):
         if not dark:
             return 5000, 100
         # po zmierzchu ciepło i przygaszone (45%); od wieczoru dokładnie jak pokoje: 40% -> 10% do 21:00
-        return 2700, (eve_dim(m, ef, PLAN.get('eve_dim', 40)) if (m >= ef or m < 240) else 45)
+        return 2700, (eve_dim(m, ef, PLAN.get('eve_dim', 40)) if (m >= ef - 60 or m < 240) else 45)  # od 18:00 (godzina przed wieczorem) 40%
     # 26.11: barwa wieczoru od 19:00, ale nie wcześniej niż 2 h po zachodzie (latem zachód ok. 21:00), żeby nie było skoku;
     # ostatnia godzina przed tym momentem: płynne przejście do 2700 K 40%
     eve = dark and (state.get('eve_ret') == day_key() or m >= ef or m < 240)
