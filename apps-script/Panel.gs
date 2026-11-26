@@ -24,10 +24,11 @@ function panelSheet_(ss) {
 }
 
 // ?action=panel&token=…            → stan domu
-// ?action=panel&c=swiatla&a={...}  → polecenie (+ stan)
+// ?action=panel&cmd=swiatla&a={...}  → polecenie (+ stan). Uwaga: parametr „c” jest zastrzeżony przez Google, stąd „cmd”.
 function panelGet_(ss, p) {
   const out = { ok: true };
-  if (p.c) out.cmd = panelCmd_(ss, String(p.c), p.a || '{}', 'panel');
+  const c = p.cmd || p.polecenie;
+  if (c) out.cmd = panelCmd_(ss, String(c), p.a || '{}', 'panel');
   return Object.assign(out, panelState_(ss, p.log === '1'));
 }
 
