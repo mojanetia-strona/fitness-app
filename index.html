@@ -363,7 +363,7 @@ const GYM_OUT_MIN = 15; // od godziny wyjścia z siłowni odejmujemy tyle minut 
 const RESUME_MIN = 90; // ten sam trening zaczęty ponownie w ciągu 90 min od końca = kontynuacja, nie nowy zapis
 const SLEEP_ADJ_MIN = 20; // stała korekta snu z telefonu // po tylu minutach bez dotknięcia apki trening kończy się sam
 const GOAL = {start:85, target:90.5, rateLo:0.2, rateHi:0.35};
-const DGOAL = {kcal:3300, p:170};
+const DGOAL = {kcal:3500, max:3800, p:170};
 const MEAS = [{k:'arm',l:'Ramię'},{k:'forearm',l:'Przedramię'},{k:'chest',l:'Klatka'},{k:'waist',l:'Talia'},{k:'thigh',l:'Udo'},{k:'calf',l:'Łydka'}];
 
 /* ============ helpers ============ */
@@ -391,7 +391,7 @@ const esc = s => String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&g
 
 /* ============ state ============ */
 const KEY='zd_state_v1';
-const fresh = () => ({v:1, view:'train', workouts:[], weights:[], measures:[], active:null, queue:[], settings:{url:'',token:'',kcal:3300,protein:170}, lastSync:null, syncErr:null, summary:null, demo:false, progEx:'bench', diet:{catering:{}, foods:[], fetched:null, eat:{}, favs:[], products:{}, daily:{}}, sleep:{}, sleepQ:{}, dietDate:null, cardio:[], customEx:{}});
+const fresh = () => ({v:1, view:'train', workouts:[], weights:[], measures:[], active:null, queue:[], settings:{url:'',token:'',kcal:3500,kcalMax:3800,protein:170}, lastSync:null, syncErr:null, summary:null, demo:false, progEx:'bench', diet:{catering:{}, foods:[], fetched:null, eat:{}, favs:[], products:{}, daily:{}}, sleep:{}, sleepQ:{}, dietDate:null, cardio:[], customEx:{}});
 let S;
 function load(){ try{ const r=localStorage.getItem(KEY); if(!r) return null; const o=Object.assign(fresh(),JSON.parse(r)); o.diet=Object.assign(fresh().diet,o.diet||{}); o.cardio=o.cardio||[]; o.customEx=o.customEx||{}; return o; }catch(e){ return null; } }
 function save(){ try{ localStorage.setItem(KEY,JSON.stringify(S)); }catch(e){} }
@@ -868,8 +868,8 @@ V.diet = () => {
   const d=S.dietDate||today(); const t=dayTotals(d); const cat=S.diet.catering[d]||[]; const foods=S.diet.foods.filter(f=>f.date===d).sort((a,b)=>(a.time||0)-(b.time||0));
   const pk=Math.min(100,t.kcal/DGOAL.kcal*100), pp=Math.min(100,t.p/DGOAL.p*100);
   let h=`<div class="dnav"><button data-a="dday" data-v="-1" aria-label="Poprzedni dzień">‹</button><h2>${d===today()?'Dziś':fD(d)}</h2>${d!==today()?'<button class="today" data-a="dday" data-v="0">Dziś</button>':''}<button data-a="dday" data-v="1" aria-label="Następny dzień">›</button></div>
-  <div class="dsum"><div class="row" style="justify-content:space-between;align-items:flex-end"><div class="big">${Math.round(t.kcal)}<small>/ ${DGOAL.kcal} kcal</small></div><div style="text-align:right;font-size:12px;color:#B9C7D0">${t.kcal<DGOAL.kcal?'zostało '+Math.round(DGOAL.kcal-t.kcal):'ponad '+Math.round(t.kcal-DGOAL.kcal)} kcal</div></div>
-    <div class="bar"><i style="width:${pk.toFixed(0)}%"${t.kcal>DGOAL.kcal*1.1?' class="over"':''}></i></div>
+  <div class="dsum"><div class="row" style="justify-content:space-between;align-items:flex-end"><div class="big">${Math.round(t.kcal)}<small>/ ${DGOAL.kcal}–${DGOAL.max} kcal</small></div><div style="text-align:right;font-size:12px;color:#B9C7D0">${t.kcal<DGOAL.kcal?'do celu '+Math.round(DGOAL.kcal-t.kcal)+' kcal':t.kcal<=DGOAL.max?'w celu, zapas '+Math.round(DGOAL.max-t.kcal)+' kcal':'ponad '+Math.round(t.kcal-DGOAL.max)+' kcal'}</div></div>
+    <div class="bar"><i style="width:${pk.toFixed(0)}%"${t.kcal>DGOAL.max?' class="over"':''}></i></div>
     <div class="mac"><div>Białko<b>${Math.round(t.p)} / ${DGOAL.p} g</b></div><div>Węgle<b>${Math.round(t.c)} g</b></div><div>Tłuszcz<b>${Math.round(t.f)} g</b></div></div>
     <div class="bar" style="margin-bottom:0"><i style="width:${pp.toFixed(0)}%;background:#A6CE3A"></i></div></div>`;
   h+=`<h3>Catering${cat[0]&&cat[0].diet?' · '+esc(String(cat[0].diet).replace(/^Dieta\s*/,'')):''}</h3>`;
@@ -1031,7 +1031,7 @@ V.settings = () => {
   <div class="field mt"><label class="label" for="stok">Token</label><input id="stok" value="${esc(st.token)}" autocapitalize="off" autocorrect="off"></div>
   <div class="row mt"><button class="btn primary" data-a="saveSettings">Zapisz i sprawdź</button><button class="btn" data-a="syncNow">Wyślij teraz</button></div>
   <p class="note" id="setmsg">${S.queue.length} w kolejce · ostatnia synchronizacja: ${S.lastSync?new Date(S.lastSync).toLocaleString('pl-PL'):'jeszcze nie'}${S.syncErr?' · '+esc(S.syncErr):''}</p></div>
-  <h3>Cele diety</h3><div class="panel"><div class="grid2"><div class="field"><label class="label" for="gkcal">Kalorie dziennie</label><input id="gkcal" inputmode="numeric" value="${DGOAL.kcal}"></div>
+  <h3>Cele diety</h3><div class="panel"><div class="grid2"><div class="field"><label class="label" for="gkcal">Kalorie od</label><input id="gkcal" inputmode="numeric" value="${DGOAL.kcal}"></div><div class="field"><label class="label" for="gkmax">Kalorie do</label><input id="gkmax" inputmode="numeric" value="${DGOAL.max}"></div>
   <div class="field"><label class="label" for="gprot">Białko (g)</label><input id="gprot" inputmode="numeric" value="${DGOAL.p}"></div></div>
   <button class="btn mt" data-a="saveGoals">Zapisz cele</button></div>
   <h3>Dane</h3><div class="panel"><div class="row"><button class="btn" data-a="pull" data-confirm="1">Pobierz z arkusza</button><button class="btn" data-a="copyBackup">Kopiuj kopię zapasową</button></div>
@@ -1162,7 +1162,7 @@ const A = {
   labGo(){ S.view='measure'; S.measTab='badania'; save(); render(); window.scrollTo(0,0); fetchDiet(true); },
   labSnooze(){ S.labSnooze=addDays(today(),7); save(); render(); },
   labScan(){ labScan(); },
-  saveGoals(){ const k=num($('#gkcal').value), p=num($('#gprot').value); if(!k||k<1000||k>8000) return flash($('#gkcal')); if(!p||p<30||p>500) return flash($('#gprot')); S.settings.kcal=k; S.settings.protein=p; applyGoals(); save(); $('#setmsg').textContent='Zapisano cele: '+k+' kcal, '+p+' g białka.'; },
+  saveGoals(){ const k=num($('#gkcal').value), km=num($('#gkmax').value), p=num($('#gprot').value); if(!k||k<1000||k>8000) return flash($('#gkcal')); if(!km||km<k||km>9000) return flash($('#gkmax')); if(!p||p<30||p>500) return flash($('#gprot')); S.settings.kcal=k; S.settings.kcalMax=km; S.settings.protein=p; applyGoals(); save(); $('#setmsg').textContent='Zapisano cele: '+k+'–'+km+' kcal, '+p+' g białka.'; },
   restore(){ try{ const j=JSON.parse($('#restore').value); ['workouts','weights','measures'].forEach(k=>{ if(Array.isArray(j[k])) S[k]=j[k]; }); S.demo=false; save(); render(); }
     catch(e){ flash($('#restore')); } },
   clearDemo(){ const st=S.settings; S=fresh(); S.settings=st; S.demoCleared=true; save(); render(); }
@@ -1177,7 +1177,7 @@ function applySwap(id){
   e.orig=e.orig||e.exId; e.exId=id; e.bumped=false; e.sets=buildSets(def); if(e.orig===id) delete e.orig;
   save(); render(); const c=document.querySelector(`[data-card="${i}"]`); if(c) c.scrollIntoView({block:'start'}); toast('Zamieniono na: '+def.name);
 }
-function applyGoals(){ DGOAL.kcal=+S.settings.kcal||3300; DGOAL.p=+S.settings.protein||170; }
+function applyGoals(){ if(+S.settings.kcal===3300&&!S.settings.kcalMax){ S.settings.kcal=3500; S.settings.kcalMax=3800; try{save();}catch(e){} } DGOAL.kcal=+S.settings.kcal||3500; DGOAL.max=Math.max(DGOAL.kcal,+S.settings.kcalMax||3800); DGOAL.p=+S.settings.protein||170; }
 function parseCode(code){ try{ const b=(String(code).replace(/^[\s\S]*?ZD:/,'').replace(/[^A-Za-z0-9+/=]/g,'')); const j=JSON.parse(decodeURIComponent(escape(atob(b)))); return (j.url&&j.token)?j:null; }catch(e){ return null; } }
 function flash(el){ if(!el) return; el.style.borderColor='var(--bad)'; el.focus(); setTimeout(()=>el.style.borderColor='',1500); }
 let toastT=null;

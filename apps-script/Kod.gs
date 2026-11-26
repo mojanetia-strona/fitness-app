@@ -203,7 +203,7 @@ function buildDiet_(ss) {
   sh.getRange('C2').setFormula(fx_('=MAP(A2:A,LAMBDA(d,IF(d="",,SUMIFS(Catering!E2:E,Catering!A2:A,d,Catering!H2:H,TRUE)+SUMIFS(Jedzenie!H2:H,Jedzenie!B2:B,d))))'));
   sh.getRange('D2').setFormula(fx_('=MAP(A2:A,LAMBDA(d,IF(d="",,SUMIFS(Catering!D2:D,Catering!A2:A,d))))'));
   sh.getRange('E2').setFormula(fx_('=MAP(A2:A,LAMBDA(d,IF(d="",,SUMIFS(Jedzenie!G2:G,Jedzenie!B2:B,d))))'));
-  sh.getRange('F2').setFormula(fx_('=MAP(A2:A,LAMBDA(d,IF(d="",,3300)))'));
+  sh.getRange('F2').setFormula(fx_('=MAP(A2:A,LAMBDA(d,IF(d="",,IF(d<DATE(2026,11,26),3300,3500))))'));
   sh.getRange('A2:A').setNumberFormat('ddd d mmm');
   sh.getRange('B2:F').setNumberFormat('0');
   sh.setColumnWidths(1, 6, 140);
@@ -1163,7 +1163,7 @@ function reportHtml_(st, sheetUrl) {
     + tile('Waga śr.', f1_(st.wNow) + ' kg', st.wDays + ' wpisów' + (st.wLast ? ', ostatni ' + f1_(st.wLast) : ''))
     + tile('Tempo', rate === null ? '–' : (rate > 0 ? '+' : '') + f1_(rate, 2) + ' kg', '<span style="color:' + rateCol + ';font-weight:700">' + rateTxt + '</span> · cel 0,2 do 0,35', rateCol)
     + tile('Treningi', st.trainings.length + ' / 5', st.sets + ' serii · ' + f1_(st.vol / 1000) + ' t') + '</tr><tr>'
-    + tile('Kalorie śr.', st.kcal === null ? '–' : Math.round(st.kcal), 'cel 3300 · ' + st.dietDays + ' dni')
+    + tile('Kalorie śr.', st.kcal === null ? '–' : Math.round(st.kcal), 'cel 3500-3800 · ' + st.dietDays + ' dni')
     + tile('Białko śr.', st.prot === null ? '–' : Math.round(st.prot) + ' g', 'cel 170 g', st.prot !== null && st.prot < 170 ? PINK : NAVY)
     + tile('Kroki · sen', st.steps === null ? '–' : Math.round(st.steps).toLocaleString('pl-PL'), 'sen śr. ' + (st.sleep === null ? '–' : f1_(st.sleep) + ' h')) + '</tr></table>';
   // komentarz trenera
@@ -1287,7 +1287,7 @@ function labExtract_(ss, blob, mime) {
   };
   const system = 'Odczytujesz polskie wyniki badań laboratoryjnych. Przepisz WSZYSTKIE parametry z dokumentu, z wartościami, jednostkami i normami dokładnie jak na wyniku. ' +
     'Grupy: morfologia (pełna morfologia z rozmazem), lipidogram, glukoza, watroba (ALT, AST, GGTP, bilirubina, ALP), nerki (kreatynina, eGFR, mocznik, kwas moczowy, cystatyna), tarczyca (TSH, FT3, FT4), witamina_d, zelazo (ferrytyna, żelazo), mocz (badanie ogólne moczu), hba1c, hormony (testosteron, SHBG, estradiol, prolaktyna), crp, inne. ' +
-    'Osoba: mężczyzna trenujący siłowo kilka razy w tygodniu, faza budowania masy, dieta ok. 3300 kcal i ok. 170 g białka dziennie. ' +
+    'Osoba: mężczyzna trenujący siłowo kilka razy w tygodniu, faza budowania masy, dieta 3500-3800 kcal (catering 3500 + dodatki) i ok. 170 g białka dziennie. ' +
     'Komentarz: krótko i rzeczowo, bez straszenia. Wymień wyniki poza normą i co mogą oznaczać w kontekście treningu i diety (np. ciężki trening 1 do 2 dni przed badaniem podnosi AST, ALT, CK i kreatyninę, dużo białka podnosi mocznik). ' +
     'Porównaj z poprzednimi wynikami, jeśli są. Napisz, z czym warto iść do lekarza. Nie stawiaj diagnoz. ' +
     'Zawsze odpowiadaj wyłącznie wywołaniem narzędzia zapisz_wyniki. Jeśli to nie są wyniki badań, zwróć pustą listę results i wyjaśnij w comment.';
