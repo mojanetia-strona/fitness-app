@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.144'
+VERSION = '1.0.145'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -46,7 +46,7 @@ PLAN = {
     'night_from': 1260,     # odłożenie telefonu po 21:00 = noc
     'night_late': 1350,     # telefon odłożony wcześniej, ale nadal leży o 22:30 = też noc
     'rh_low': 48,           # salon: poniżej tej wilgotności (Qingping) nawilżacz na mocno
-    'rh_ok': 50,            # salon: od tej wilgotności nawilżacz wraca do stałej wilgotności
+    'rh_ok': 53,            # salon: od tej wilgotności (Qingping) nawilżacz wraca do stałej wilgotności (26.11: było 50, przeskakiwał co 15 min)
     'pm_hi': 20,            # salon: PM2.5 z Qingpinga powyżej -> oczyszczacz bieg 3
     'pm_mid': 8,            # ... powyżej -> bieg 2, do tej wartości bieg 1 (cicho)
     'rh_target': 50,        # cel stałej wilgotności w salonie
