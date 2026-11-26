@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.143'
+VERSION = '1.0.144'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -581,6 +581,9 @@ def light_target(room='work', m=None):
         if state.get('asleep') or nl_eve_on():
             return 2700, 10        # noc: jedna żarówka, minimum WiZ (10%), ciepło
         if morning_on():
+            # 26.11: pierwsze 10 min po wstaniu łagodnie jak salon (rozbudzam się, np. na wadze), potem białe 6000 K 100%
+            if time.time() - state['morn']['t0'] < PLAN.get('bath_soft_s', 600):
+                return PLAN.get('morn_k', 2800), PLAN.get('morn_dim', 50)
             return 6000, 100       # rano: białe, jasne, rozbudza
         return (2700, 45) if dark else (5000, 100)  # po zmierzchu ciepło i przygaszone, relaksująco
     eve = dark and (state.get('eve_ret') == day_key() or m >= PLAN.get('eve_from', 1140) or m < 240)
@@ -2307,12 +2310,12 @@ def scale_tick():
             NOW[0] = True  # pobudka z wagi: od razu synchronizacja i reguły, bez czekania na kolejny cykl
             bips = list(room_ips('bath'))
             if bips:  # 26.11: łazienka od razu pełne poranne światło, reszta poranka po synchronizacji
-                pr = {'state': True, 'temp': PLAN.get('bath_morn_k', 6000), 'dimming': 100}
+                pr = {'state': True, 'temp': PLAN.get('morn_k', 2800), 'dimming': PLAN.get('morn_dim', 50)}  # łagodnie (26.11)
                 bc = {'room': 'bath', 'on': True, 't0': time.time(), 'left': set(bips), 'n': len(bips), 'rs': 0, 'done': {}}
                 room_burst(bips, pr, bc)
                 for ip in bips:  # do czasu synchronizacji (pobudka) nie poprawiamy barwy z powrotem na nocną
                     WS.setdefault('fix', {})[ip] = time.time() + 40
-                log('waga: pobudka, lazienka od razu pelne swiatlo')
+                log('waga: pobudka, lazienka od razu lagodne poranne swiatlo')
         scale['last_kg'] = kg
         scale['last_sent'] = time.time()
         log('waga %.2f kg zapisana' % kg)
