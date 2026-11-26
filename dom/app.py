@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.149'
+VERSION = '1.0.150'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -423,11 +423,14 @@ def panel_exec(c, a):
 
 
 def panel_cmds(sync):
-    for c in (sync or {}).get('cmds') or []:
+    cs = (sync or {}).get('cmds') or []
+    for c in cs:
         try:
             panel_exec(c.get('c'), c.get('a') or {})
         except Exception as e:
             log('panel blad %s: %s' % (c.get('c'), e))
+    if cs:
+        NOW[0] = True  # od razu kolejna synchronizacja: panel zobaczy nowy stan po kilku sekundach
 
 
 def panel_state():
