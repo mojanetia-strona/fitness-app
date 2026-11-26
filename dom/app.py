@@ -586,9 +586,11 @@ def light_target(room='work', m=None):
                 return PLAN.get('morn_k', 2800), PLAN.get('morn_dim', 50)
             return 6000, 100       # rano: białe, jasne, rozbudza
         return (2700, 45) if dark else (5000, 100)  # po zmierzchu ciepło i przygaszone, relaksująco
-    eve = dark and (state.get('eve_ret') == day_key() or m >= PLAN.get('eve_from', 1140) or m < 240)
-    ef = PLAN.get('eve_from', 1140)
-    pre = max(0.0, min(1.0, (m - (ef - 60)) / 60.0)) if dark and ef - 60 <= m < ef else 0.0  # 18:00-19:00: płynnie do wieczoru
+    # 26.11: barwa wieczoru od 19:00, ale nie wcześniej niż 2 h po zachodzie (latem zachód ok. 21:00), żeby nie było skoku;
+    # ostatnia godzina przed tym momentem: płynne przejście do 2700 K 40%
+    ef = max(PLAN.get('eve_from', 1140), ss + 120) if ss + 120 < 1440 else PLAN.get('eve_from', 1140)
+    eve = dark and (state.get('eve_ret') == day_key() or m >= ef or m < 240)
+    pre = max(0.0, min(1.0, (m - (ef - 60)) / 60.0)) if dark and ef - 60 <= m < ef else 0.0
     if room == 'bed':
         if eve:
             return PLAN.get('eve_k', 2700), PLAN.get('eve_dim', 40)  # tryb wieczór: jak salon i kuchnia
