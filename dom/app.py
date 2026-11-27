@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.158'
+VERSION = '1.0.159'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -1515,6 +1515,18 @@ def wake_ceiling(p):
         ws_send(ip, {'state': True, 'temp': k, 'dimming': dim})
 
 
+def wake_half():
+    """27.11: połowa budzenia: cicho otwieramy zasłony. Ich start to w aplikacji treningowej godzina pobudki
+    (budzi mnie ich dźwięk), więc arkusz dostaje znacznik przebudzenia."""
+    if not state.get('asleep'):
+        return
+    curtains('open', 'budzenie, polowa')
+    try:
+        gas({}, action='przebudzenie')
+    except Exception as e:
+        log('przebudzenie: blad wysylki %s' % e)
+
+
 def wake_light_tick():
     """Co 15 s podczas rozjaśniania: kolejny krok jasności."""
     wl = state.get('wl')
@@ -1534,6 +1546,7 @@ def wake_light_tick():
             wl['half'] = 1
             state['wl'] = wl
             log('budzenie swiatlem: polowa (sypialnia, salon, kuchnia: %d zarowek)' % (len(room_ips('bed')) + len(room_ips('work'))))
+            wake_half()
         return
     if p >= 1:
         if wiz(wake_pilot(1.0)) is None and 'Invalid params' in str(state.get('wiz_err')):
@@ -1554,6 +1567,7 @@ def wake_light_tick():
         wl['half'] = 1
         state['wl'] = wl
         log('budzenie swiatlem: polowa (lampka odpowiada)')
+        wake_half()
     if not ok and not wl.get('err'):
         wl = dict(wl)
         wl['err'] = 1
@@ -2565,11 +2579,16 @@ def scale_tick():
         return
     if scale['last_kg'] and abs(kg - scale['last_kg']) < 0.05 and time.time() - scale['last_sent'] < 600:
         return
+    early = False
+    if state.get('asleep') and 240 <= mins() < 780:
+        # 27.11: rano waga od razu daje poranne światło w łazience, bez czekania na odpowiedź arkusza (kilka sekund)
+        early = True
+        bath_wake_light()
     try:
         res = gas({'kg': '%.2f' % kg})
         if isinstance(res, dict) and res.get('pobudka_waga'):
             NOW[0] = True  # pobudka z wagi: od razu synchronizacja i reguły, bez czekania na kolejny cykl
-            bips = list(room_ips('bath'))
+            bips = [] if early else list(room_ips('bath'))
             if bips:  # 26.11: łazienka od razu pełne poranne światło, reszta poranka po synchronizacji
                 pr = {'state': True, 'temp': PLAN.get('morn_k', 2800), 'dimming': PLAN.get('morn_dim', 50)}  # łagodnie (26.11)
                 bc = {'room': 'bath', 'on': True, 't0': time.time(), 'left': set(bips), 'n': len(bips), 'rs': 0, 'done': {}}
@@ -2587,6 +2606,18 @@ def scale_tick():
 
 
 NOW = [False]  # wymuszenie natychmiastowej synchronizacji (np. pobudka z wagi)
+
+
+def bath_wake_light():
+    bips = list(room_ips('bath'))
+    if not bips:
+        return
+    pr = {'state': True, 'temp': PLAN.get('morn_k', 2800), 'dimming': PLAN.get('morn_dim', 50)}
+    bc = {'room': 'bath', 'on': True, 't0': time.time(), 'left': set(bips), 'n': len(bips), 'rs': 0, 'done': {}}
+    room_burst(bips, pr, bc)
+    for ip in bips:
+        WS.setdefault('fix', {})[ip] = time.time() + 40
+    log('waga: pobudka, lazienka od razu lagodne poranne swiatlo')
 
 # ---------- Komputer ON → Muzyka Poranna OFF ----------
 PC = {'on': None, 'evt': False, 't': 0}
@@ -2961,7 +2992,7 @@ def tick_rules(sync, q):
                     ws // 60, ws % 60, wm // 60, wm % 60, ', budzik %d:%02d' % (am // 60, am % 60) if am is not None else ''))
                 state['wl'] = {'t0': time.time() - (m - ws) * 60}
                 state['wl_at'] = 0
-                curtains('open', 'budzenie')  # cicho, razem z rozjaśnianiem lampki
+                # 27.11: zasłony ruszają dopiero w połowie rozjaśniania (budził mnie ich dźwięk od razu na starcie)
                 # 26.11: powietrze rusza już z budzeniem (zaraz wstaję), nie dopiero po wstaniu
                 dev_set('salon_hum', 'on', True)
                 if dev_set('salon_hum', 'sh_mode', 0, 'budzenie: salon nawilzacz tryb dzienny'):

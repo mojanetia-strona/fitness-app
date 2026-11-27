@@ -342,6 +342,7 @@ function doGet(e) {
   if (p.action === 'phone') return json_(phoneEvent_(ss, p.e));
   if (p.action === 'gym') return json_(gymEvent_(ss, p.e, p.g));
   if (p.action === 'away') return json_(awayEvent_(ss, p.e));
+  if (p.action === 'przebudzenie') return json_(wakeCurtain_(ss));
   if (p.action === 'esp') { PropertiesService.getScriptProperties().setProperty('ESP_LAST', String(Date.now())); return json_(espSync_(ss, p)); } // strażnik: ostatnie zgłoszenie płytki
   if (p.action === 'panel') return json_(panelGet_(ss, p)); // panel domu dom.ldesk.pl (Panel.gs)
   if (p.action === 'ean') return json_(eanLookup_(ss, p.code)); // test z przeglądarki
@@ -759,10 +760,15 @@ function phoneNight_(ss, date) {
   const downs = ev.filter(x => x.e === 'odłożony' && x.t >= t(-6) && x.t < t(4));
   if (!downs.length) return { date: date, bed: null };
   const bed = downs[downs.length - 1].t;
-  const up = ev.filter(x => x.e === 'zdjęty' && x.t > bed && x.t >= t(4) && x.t < t(13))[0];
-  if (!up) return { date: date, bed: new Date(bed) };
+  const up0 = ev.filter(x => x.e === 'zdjęty' && x.t > bed && x.t >= t(4) && x.t < t(13))[0];
+  if (!up0) return { date: date, bed: new Date(bed) };
   // korekta 20 min: ok. 15 min zasypiania + 5 min od pobudki do wzięcia telefonu
-  const hours = Math.max(0, Math.round(((up.t - bed) / 36e5 - 20 / 60) * 100) / 100);
+  let up = up0, adj = 20;
+  try { // 27.11: start zasłon przy budzeniu = pobudka (wcześniejszy niż telefon); wtedy korekta tylko 15 min zasypiania
+    const wc = JSON.parse(PropertiesService.getScriptProperties().getProperty('WAKE_CURTAIN') || 'null');
+    if (wc && wc.d === date && wc.t > bed && wc.t < up0.t) { up = { t: wc.t }; adj = 15; }
+  } catch (e) {}
+  const hours = Math.max(0, Math.round(((up.t - bed) / 36e5 - adj / 60) * 100) / 100);
   upsertDaily_(ss, date, { sleep: hours }, 'telefon');
   const v2 = dl.getRange(2, 1, dl.getLastRow() - 1, 1).getValues();
   for (let i = 0; i < v2.length; i++) if (key_(v2[i][0]) === date) { dl.getRange(i + 2, 6, 1, 2).setValues([[new Date(bed), new Date(up.t)]]).setNumberFormat('HH:mm'); break; }
@@ -949,6 +955,17 @@ function awayEvent_(ss, e) {
   const lg = ss.getSheetByName('Dom');
   if (lg) lg.appendRow([new Date(), e === 'out' ? 'telefon: dalej niz 1,5 km od domu' : 'telefon: z powrotem blisko domu']);
   return { ok: true, e: e, t: t };
+}
+
+// 27.11: płytka w połowie budzenia światłem otwiera zasłony; ich start = godzina pobudki w aplikacji (budzi mnie ich dźwięk).
+// Zapis tylko 4:00-13:00; phoneNight_ bierze wcześniejszą z: start zasłon, pierwsze zdjęcie telefonu.
+function wakeCurtain_(ss) {
+  const now = new Date(), hr = Number(Utilities.formatDate(now, TZ, 'H'));
+  if (hr < 4 || hr >= 13) return { ok: false, error: 'poza porankiem' };
+  const today = Utilities.formatDate(now, TZ, 'yyyy-MM-dd');
+  PropertiesService.getScriptProperties().setProperty('WAKE_CURTAIN', JSON.stringify({ d: today, t: now.getTime() }));
+  try { const lg = ss.getSheetByName('Dom'); if (lg) lg.appendRow([now, 'przebudzenie: zaslony ruszaja (godzina pobudki w aplikacji)']); } catch (e) {}
+  return { ok: true };
 }
 
 /* ================= PŁYTKA ESP32 (automatyka domu) ================= */
