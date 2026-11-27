@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.162'
+VERSION = '1.0.163'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -1425,7 +1425,18 @@ def nl_tick():
                 print('lampka nocna: start, zgaszona')
 
 
+def bath_off_now(why):
+    """27.11: zdarzenie, które na pewno dzieje się poza łazienką (drzwi sypialni, lampka nocna): łazienka gaśnie od razu,
+    bez czekania 2-8 min na brak ruchu. Następny ruch w łazience zapala ją normalnie."""
+    lit = [x for mac, x in WS['seen'].items() if room_of(mac) == 'bath' and x['p'].get('state')]
+    MOT['on'] = False
+    MAN.pop('bath', None)
+    if lit:
+        room_set('bath', False, why)
+
+
 def nl_event(on):
+    bath_off_now('lampka nocna %s: lazienka off' % ('on' if on else 'off'))
     m = mins()
     if m >= PLAN['night_from'] or m < 240:
         man_clear('lampka nocna')
@@ -2147,6 +2158,7 @@ def door_tick():
     if not first:  # pierwszy odczyt po starcie płytki to stan, nie zdarzenie
         t0 = time.time()
         bed_door(bool(w['open']))  # najpierw światło, wpis do logu potem
+        bath_off_now('drzwi sypialni: lazienka off')
         log('drzwi sypialni %s (od odbioru sygnalu %.1f s, wyslanie polecenia %.1f s)' % (
             'otwarte' if w['open'] else 'zamkniete', t0 - w.get('t', t0), time.time() - t0))
 
