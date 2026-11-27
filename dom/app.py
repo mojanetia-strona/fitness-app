@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.159'
+VERSION = '1.0.160'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -1113,6 +1113,23 @@ def bath_tick():
         MOT['rs_at'] = time.time() + 2
         MOT['new'] = True
         MOT['quiet'] = True
+    if MOT['new'] and not MOT['on'] and state.get('asleep') and wake_hold() and MOT.get('wake_day') != day_key():
+        # 27.11: w trakcie budzenia (rozjaśnianie trwa albo skończone, a ja jeszcze „śpię”) ruch w łazience = wstałem.
+        # Od razu poranne światło w łazience, arkusz zapisuje pobudkę (jak waga albo zdjęcie telefonu) i rusza poranek.
+        MOT['new'] = False
+        MOT['wake_day'] = day_key()
+        MOT['on'] = True
+        MOT['on_at'] = time.time()
+        bath_wake_light()
+        log('lazienka ruch w trakcie budzenia: wstalem')
+        try:
+            res = gas({'src': 'lazienka'}, action='wstalem')
+            if isinstance(res, dict) and res.get('pobudka'):
+                NOW[0] = True
+        except Exception as e:
+            log('wstalem z lazienki: blad %s' % e)
+        NOW[0] = True
+        return
     if MOT['new']:
         MOT['new'] = False
         if not MOT.pop('quiet', False):

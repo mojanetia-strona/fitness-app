@@ -343,6 +343,7 @@ function doGet(e) {
   if (p.action === 'gym') return json_(gymEvent_(ss, p.e, p.g));
   if (p.action === 'away') return json_(awayEvent_(ss, p.e));
   if (p.action === 'przebudzenie') return json_(wakeCurtain_(ss));
+  if (p.action === 'wstalem') return json_({ ok: true, pobudka: scaleWake_(ss, p.src || 'lazienka') }); // 27.11: ruch w łazience w trakcie budzenia
   if (p.action === 'esp') { PropertiesService.getScriptProperties().setProperty('ESP_LAST', String(Date.now())); return json_(espSync_(ss, p)); } // strażnik: ostatnie zgłoszenie płytki
   if (p.action === 'panel') return json_(panelGet_(ss, p)); // panel domu dom.ldesk.pl (Panel.gs)
   if (p.action === 'ean') return json_(eanLookup_(ss, p.code)); // test z przeglądarki
@@ -907,7 +908,7 @@ function testMuzykaOff() {
 
 /* Pobudka z wagi: jeśli rano (4-13) ważę się, a telefon wciąż leży na ładowarce od nocy, to ważenie liczy się jak zdjęcie telefonu
    (zapis „zdjęty” ze źródłem „waga”). Liczy się to, co było pierwsze: późniejsze zdjęcie telefonu nic już nie powtarza. */
-function scaleWake_(ss) {
+function scaleWake_(ss, src) {
   const now = new Date(), hr = Number(Utilities.formatDate(now, TZ, 'H'));
   if (hr < 4 || hr >= 13) return false;
   const log = ss.getSheetByName('Telefon'); if (!log || log.getLastRow() < 2) return false;
@@ -915,8 +916,8 @@ function scaleWake_(ss) {
   if (!(last[0] instanceof Date) || last[1] !== 'odłożony') return false;
   const today = Utilities.formatDate(now, TZ, 'yyyy-MM-dd'), d0 = toDate_(today).getTime();
   if (last[0].getTime() < d0 - 6 * 36e5 || last[0].getTime() >= d0 + 4 * 36e5) return false; // odłożony na noc (wczoraj od 18:00 do 4:00)
-  log.appendRow([now, 'zdjęty', 'waga']);
-  try { const lg = ss.getSheetByName('Dom'); if (lg) lg.appendRow([now, 'pobudka z wagi (telefon jeszcze na ladowarce)']); } catch (e) {}
+  log.appendRow([now, 'zdjęty', src || 'waga']);
+  try { const lg = ss.getSheetByName('Dom'); if (lg) lg.appendRow([now, 'pobudka z ' + (src === 'lazienka' ? 'lazienki (ruch w trakcie budzenia)' : 'wagi') + ' (telefon jeszcze na ladowarce)']); } catch (e) {}
   // muzyka od razu (Samsung łączy głośnik, Spotify gra playlistę), żeby ruszyła zaraz po zejściu z wagi
   try {
     const hook = PropertiesService.getScriptProperties().getProperty('SAMSUNG_HOOK');
