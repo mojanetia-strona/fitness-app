@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.163'
+VERSION = '1.0.164'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -1428,11 +1428,16 @@ def nl_tick():
 def bath_off_now(why):
     """27.11: zdarzenie, które na pewno dzieje się poza łazienką (drzwi sypialni, lampka nocna): łazienka gaśnie od razu,
     bez czekania 2-8 min na brak ruchu. Następny ruch w łazience zapala ją normalnie."""
-    lit = [x for mac, x in WS['seen'].items() if room_of(mac) == 'bath' and x['p'].get('state')]
+    lit = [x['ip'] for mac, x in WS['seen'].items() if room_of(mac) == 'bath' and x['p'].get('state')]
     MOT['on'] = False
     MAN.pop('bath', None)
     if lit:
-        room_set('bath', False, why)
+        # bez room_set: ten zapamiętuje „zgaszone” na 5 min i gasił łazienkę po każdym wejściu (1.0.163, 27.11)
+        for ip in lit:
+            WS.get('want', {}).pop(ip, None)
+        bc = {'room': 'bath', 'on': False, 't0': time.time(), 'left': set(lit), 'n': len(lit), 'rs': 0, 'done': {}}
+        room_burst(lit, {'state': False}, bc)
+        log(why)
 
 
 def nl_event(on):
