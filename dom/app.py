@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.160'
+VERSION = '1.0.161'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -91,6 +91,7 @@ PLAN = {
     'cur_right': 'C8:58:63:F2:4C:79',
     'cur_left_open': 82,    # % otwarcia lewej zasłony (100 = całkiem odsunięta, 0 = zasunięta)
     'cur_right_open': 65,   # % otwarcia prawej
+    'bed_door': '08:B9:5F:E5:F8:1D',  # 27.11: czujnik drzwi sypialni (Shelly BLU Door/Window)
     'cur_quiet': 1,         # prędkość cicha (budzenie, zasuwanie na noc)
     'cur_fast': 255,        # prędkość zwykła (po wstaniu)
 }
@@ -392,6 +393,7 @@ def panel_exec(c, a):
                 MAN[key] = {'on': False, 't': time.time()}
                 plug_set(PLAN[key], False, 'panel: %s off' % key)
     elif c == 'czytanie':
+        state['read_day'] = day_key()
         for r in ('work', 'bed'):
             panel_lights(r, False)
         if PLAN.get('lamp_salon'):
@@ -762,15 +764,7 @@ def light_target(room='work', m=None):
     # ostatnia godzina przed tym momentem: płynne przejście do 2700 K 40%
     eve = dark and (state.get('eve_ret') == day_key() or m >= ef or m < 240)
     pre = max(0.0, min(1.0, (m - (ef - 60)) / 60.0)) if dark and ef - 60 <= m < ef else 0.0
-    if room == 'bed':
-        if eve:
-            return PLAN.get('eve_k', 2700), eve_dim(m, ef, PLAN.get('eve_dim', 40))  # tryb wieczór: jak salon i kuchnia
-        if dark:  # 26.11: płynnie, bez skoków: po zmierzchu przez 2 h 100% -> 60%, 18:00-19:00 dalej do 40%
-            d = 100 - 40 * min(1.0, ((m - ss) % 1440) / 120.0)
-            d = d - (d - PLAN.get('eve_dim', 40)) * pre
-            return 2700, int(d + 0.5)
-        return 2700, 100  # zawsze ciepło
-    # salon + kuchnia
+    # salon + kuchnia, a od 27.11 także sypialnia: identyczne barwy i jasność przez cały dzień
     if state.get('asleep'):
         return 2700, 50
     if morning_on():
@@ -2287,9 +2281,47 @@ def air_guard():
                 print('air_guard trv', e)
 
 
+def bed_door(opened):
+    """27.11: drzwi sypialni (Shelly BLU Door/Window na futrynie).
+    Rano w trakcie budzenia otwarcie = wstałem (pierwszy wyzwalacz poranka; łazienka, waga i telefon to zapas).
+    W dzień i wieczorem otwarcie zapala zgaszoną sypialnię (barwa jak salon), aż do trybu czytania.
+    W tygodniu przed 18:00 zamknięcie gasi sypialnię od razu."""
+    m = mins()
+    asleep = state.get('asleep')
+    log('drzwi sypialni %s' % ('otwarte' if opened else 'zamkniete'))
+    if opened:
+        if asleep and wake_hold() and MOT.get('wake_day') != day_key():
+            MOT['wake_day'] = day_key()
+            log('drzwi sypialni w trakcie budzenia: wstalem')
+            try:
+                gas({'src': 'drzwi'}, action='wstalem')
+            except Exception as e:
+                log('wstalem z drzwi: blad %s' % e)
+            NOW[0] = True
+            return
+        reading = nl_eve_on() or state.get('read_day') == day_key()
+        if asleep or state.get('away') or state.get('wl') or reading:
+            return
+        lit = [x for mac, x in WS['seen'].items() if room_of(mac) == 'bed' and x['p'].get('state')]
+        if not lit:
+            room_set('bed', True, 'drzwi')
+    else:
+        if not asleep and not is_weekend() and m < 1080 and not state.get('wl'):
+            lit = [x for mac, x in WS['seen'].items() if room_of(mac) == 'bed' and x['p'].get('state')]
+            if lit:
+                room_set('bed', False, 'drzwi zamkniete (w tygodniu przed 18:00)')
+
+
 def win_tick():
     air_guard()
     for mac, w in list(win.items()):
+        if mac == PLAN.get('bed_door'):
+            if win_seen.get(mac) != w['open']:
+                first = mac not in win_seen
+                win_seen[mac] = w['open']
+                if not first:  # pierwszy odczyt po starcie płytki to stan, nie zdarzenie
+                    bed_door(bool(w['open']))
+            continue
         if win_seen.get(mac) != w['open']:
             first = mac not in win_seen
             win_seen[mac] = w['open']
@@ -2917,11 +2949,10 @@ def tick_rules(sync, q):
                 # kolejność (25.11): najpierw światło, bo je widać; nawilżacze i reszta potem
                 if eve:  # wieczorem: salon, kuchnia i sypialnia klimatycznie (LED-y w kuchni za mocne: off; Lampa Salon tylko do czytania)
                     state['eve_ret'] = day_key()
-                    room_set('work', True, 'powrot wieczorem, klimatycznie')
-                    room_set('bed', True, 'powrot wieczorem')  # sypialnia ciepło, przygaszona
+                    room_set('work', True, 'powrot wieczorem, klimatycznie')  # 27.11: sypialni nie zapalamy (zapalą ją drzwi)
                 else:
                     room_set('work', True, 'powrot w dzien')  # cały salon i kuchnia
-                log('powrot do domu: salon on%s%s' % (', sypialnia on' if bed_ok else '', ', wieczor' if eve else ''))
+                log('powrot do domu: salon on%s' % (', wieczor' if eve else ''))
                 if eve and PLAN.get('kitchen_led'):
                     plug_set(PLAN['kitchen_led'], False, 'kitchen_led off (wieczor)')
                 hum_on('salon_hum', 's', None)
