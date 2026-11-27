@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.161'
+VERSION = '1.0.162'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -2130,9 +2130,25 @@ def fast_tick():
         http_tick()
         ucho_tick()
         bath_tick()
+        door_tick()
         target_tick()
     except Exception as e:
         print('fast', e)
+
+
+def door_tick():
+    """27.11: drzwi sypialni sprawdzane co 0,25 s (jak łazienka), a nie raz na obieg głównej pętli."""
+    mac = PLAN.get('bed_door')
+    w = win.get(mac) if mac else None
+    if w is None or win_seen.get(mac) == w['open']:
+        return
+    first = mac not in win_seen
+    win_seen[mac] = w['open']
+    if not first:  # pierwszy odczyt po starcie płytki to stan, nie zdarzenie
+        t0 = time.time()
+        bed_door(bool(w['open']))  # najpierw światło, wpis do logu potem
+        log('drzwi sypialni %s (od odbioru sygnalu %.1f s, wyslanie polecenia %.1f s)' % (
+            'otwarte' if w['open'] else 'zamkniete', t0 - w.get('t', t0), time.time() - t0))
 
 
 def http_tick():
@@ -2288,7 +2304,6 @@ def bed_door(opened):
     W tygodniu przed 18:00 zamknięcie gasi sypialnię od razu."""
     m = mins()
     asleep = state.get('asleep')
-    log('drzwi sypialni %s' % ('otwarte' if opened else 'zamkniete'))
     if opened:
         if asleep and wake_hold() and MOT.get('wake_day') != day_key():
             MOT['wake_day'] = day_key()
@@ -2316,11 +2331,7 @@ def win_tick():
     air_guard()
     for mac, w in list(win.items()):
         if mac == PLAN.get('bed_door'):
-            if win_seen.get(mac) != w['open']:
-                first = mac not in win_seen
-                win_seen[mac] = w['open']
-                if not first:  # pierwszy odczyt po starcie płytki to stan, nie zdarzenie
-                    bed_door(bool(w['open']))
+            door_tick()
             continue
         if win_seen.get(mac) != w['open']:
             first = mac not in win_seen
