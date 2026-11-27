@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.164'
+VERSION = '1.0.165'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -396,9 +396,7 @@ def panel_exec(c, a):
         state['read_day'] = day_key()
         for r in ('work', 'bed'):
             panel_lights(r, False)
-        if PLAN.get('lamp_salon'):
-            MAN['lamp_salon'] = {'on': True, 't': time.time()}
-            plug_set(PLAN['lamp_salon'], True, 'panel: tryb czytania, lampa salon on')
+        reading_lamp('panel: tryb czytania')
     elif c == 'temp':
         name = {'salon': 'salon', 'sypialnia': 'bed', 'bed': 'bed'}.get(a.get('room'))
         t = float(a.get('t', 0))
@@ -1440,6 +1438,20 @@ def bath_off_now(why):
         log(why)
 
 
+def door_open_now():
+    w = win.get(PLAN.get('bed_door') or '')
+    return bool(w and w.get('open'))
+
+
+def reading_lamp(why):
+    """27.11: w trybie czytania lampa za kanapą świeci tylko przy otwartych drzwiach sypialni (wyszedłem do salonu
+    albo kuchni); przy zamkniętych gaśnie, bo siedzę w sypialni, a za ścianą świeciłaby na darmo."""
+    if PLAN.get('lamp_salon'):
+        on = door_open_now()
+        MAN.pop('lamp_salon', None)
+        plug_set(PLAN['lamp_salon'], on, 'lampa salon %s (%s)' % ('on' if on else 'off', why))
+
+
 def nl_event(on):
     bath_off_now('lampka nocna %s: lazienka off' % ('on' if on else 'off'))
     m = mins()
@@ -1473,13 +1485,12 @@ def nl_event(on):
         # lampka po 21:00: wszystko gaśnie poza lampą za kanapą, łazienka nocna, zasłony zasuwane
         state['nl_eve'] = time.time()
         cozy = PLAN['night_from'] <= m < 1320
-        log('lampka nocna on: gasze wszystko, zapalam lampe salon%s' % (', lampka za lozkiem przytulnie do 22:00' if cozy else ''))
+        log('lampka nocna on: gasze wszystko, czytanie%s' % (', lampka za lozkiem przytulnie do 22:00' if cozy else ''))
         for r in ('work', 'bed'):
             room_set(r, False, 'lampka nocna')
         if PLAN.get('kitchen_led'):
             plug_set(PLAN['kitchen_led'], False, 'kuchnia led off')
-        if PLAN.get('lamp_salon'):
-            plug_set(PLAN['lamp_salon'], True, 'lampa salon on (czytanie)')  # jedyne światło w salonie przed nocą
+        reading_lamp('czytanie, lampa tylko przy otwartych drzwiach sypialni')
         if PLAN.get('wiz_bed'):
             if cozy:
                 state['cozy'] = day_key()
@@ -1505,6 +1516,9 @@ def nl_event(on):
     # zgaszona 21:00-4:00 = idę spać
     state['ln_t'] = time.time()
     log('lampka nocna off: noc')
+    if PLAN.get('lamp_salon'):
+        MAN.pop('lamp_salon', None)
+        plug_set(PLAN['lamp_salon'], False, 'lampa salon off (noc)')
     NOW[0] = True
     try:
         gas({'e': 'down'}, False, 'phone')  # wpis „odłożony” w Telefon: od niego liczy się sen
@@ -2332,12 +2346,18 @@ def bed_door(opened):
             NOW[0] = True
             return
         reading = nl_eve_on() or state.get('read_day') == day_key()
-        if asleep or state.get('away') or state.get('wl') or reading:
+        if reading and not asleep and not state.get('away'):
+            reading_lamp('drzwi sypialni otwarte, czytanie')
+            return
+        if asleep or state.get('away') or state.get('wl'):
             return
         lit = [x for mac, x in WS['seen'].items() if room_of(mac) == 'bed' and x['p'].get('state')]
         if not lit:
             room_set('bed', True, 'drzwi')
     else:
+        if (nl_eve_on() or state.get('read_day') == day_key()) and not asleep and not state.get('away'):
+            reading_lamp('drzwi sypialni zamkniete, czytanie')
+            return
         if not asleep and not is_weekend() and m < 1080 and not state.get('wl'):
             lit = [x for mac, x in WS['seen'].items() if room_of(mac) == 'bed' and x['p'].get('state')]
             if lit:
