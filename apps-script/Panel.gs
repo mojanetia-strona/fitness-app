@@ -8,6 +8,7 @@
 // Polecenia: swiatla {room: work|bed|bath|all, on, k?, dim?} · lampa {key: lamp_salon|kitchen_led|desk_light, on}
 //   wszystko_off {} · czytanie {} · temp {room: salon|sypialnia, t} · budzenie {on: false|true} · robot {akcja: start|dock}
 //   wyjscie {} · powrot {} (te dwa jak skróty iPhone'a: zdarzenie wyjścia/powrotu)
+//   dyfuzor {room: s|b, akcja: on|off|onoff|light|aroma|lvl|timer|sync, l?: 1–6, v?: 1|4|8 albo true/false}
 
 const PANEL_SHEET = 'Panel';
 const PANEL_POKE = 'http://77.252.240.204:18089/teraz?k=';
@@ -45,7 +46,7 @@ function panelCmd_(ss, c, a, src) {
     panelPoke_();
     return { ok: true, c: c };
   }
-  const allowed = ['swiatla', 'lampa', 'wszystko_off', 'czytanie', 'temp', 'budzenie', 'robot'];
+  const allowed = ['swiatla', 'lampa', 'wszystko_off', 'czytanie', 'temp', 'budzenie', 'robot', 'dyfuzor'];
   if (allowed.indexOf(c) < 0) return { ok: false, error: 'nieznane polecenie' };
   panelSheet_(ss).appendRow([new Date(), c, JSON.stringify(args), '', src || 'panel']);
   SpreadsheetApp.flush();

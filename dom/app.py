@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.171'
+VERSION = '1.0.172'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -417,6 +417,17 @@ def panel_exec(c, a):
             elif k == 'lvl':
                 aroma_send(r, {'c': 'level', 'l': int(a.get('l', 1))})
                 log('dyfuzor %s poziom %s, panel' % (ROOM_NAME[r], a.get('l', 1)))
+            elif k == 'timer':
+                aroma_send(r, {'c': 'timer', 'v': int(a.get('v', 1))})
+                log('dyfuzor %s timer %sh, panel' % (ROOM_NAME[r], a.get('v', 1)))
+            elif k == 'onoff':  # sam przycisk ON/OFF pilota, bez zmiany zapamiętanego stanu
+                aroma_send(r, {'c': 'raw', 'v': 0x45})
+                log('dyfuzor %s przycisk ON/OFF, panel' % ROOM_NAME[r])
+            elif k == 'sync':  # korekta: dyfuzor faktycznie jest włączony / wyłączony
+                v = bool(a.get('v'))
+                AR[r]['want'] = None
+                aroma_send(r, {'c': 'sync', 'v': v})
+                log('dyfuzor %s stan ustawiony recznie: %s' % (ROOM_NAME[r], 'on' if v else 'off'))
     elif c == 'budzenie':
         if a.get('on') is False or a.get('on') == 0 or str(a.get('on')).lower() in ('false', 'off', 'nie', '0'):
             # najbliższy poranek: dziś, jeśli jeszcze przed południem i przed pobudką, inaczej jutro
