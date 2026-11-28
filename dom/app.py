@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.170'
+VERSION = '1.0.171'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -406,6 +406,17 @@ def panel_exec(c, a):
         if name and 10 <= t <= 28:
             trv_target(name, t)
             log('panel: grzejnik %s %.1f' % (name, t))
+    elif c == 'dyfuzor':  # {room: s|b|salon|sypialnia, akcja: on|off|light|aroma|lvl, l?}
+        r = {'salon': 's', 'biuro': 's', 'sypialnia': 'b', 'bed': 'b'}.get(a.get('room'), a.get('room'))
+        if r in AR:
+            k = a.get('akcja') or ('on' if a.get('on') else 'off')
+            if k in ('on', 'off'):
+                aroma(r, k == 'on', 'panel')
+            elif k in ('light', 'aroma'):
+                log('dyfuzor %s %s, panel%s' % (ROOM_NAME[r], k, '' if aroma_send(r, {'c': k}) else ' (brak plytki)'))
+            elif k == 'lvl':
+                aroma_send(r, {'c': 'level', 'l': int(a.get('l', 1))})
+                log('dyfuzor %s poziom %s, panel' % (ROOM_NAME[r], a.get('l', 1)))
     elif c == 'budzenie':
         if a.get('on') is False or a.get('on') == 0 or str(a.get('on')).lower() in ('false', 'off', 'nie', '0'):
             # najbliższy poranek: dziś, jeśli jeszcze przed południem i przed pobudką, inaczej jutro
@@ -459,6 +470,7 @@ def panel_state():
               state.get('trv_salon') or TTGT.get('salon') or (room_temp('s', None) and TTGT.get('salon'))],
         'b': [room_temp('b', None), state.get('trv_bed') or TTGT.get('bed')],  # sypialnia: odczyt z głowicy najwyżej co 5 min
         'rh': q[0], 'pm': q[1], 'co2': q[3], 'm': [k for k in MAN],
+        'ar': {r: [1 if AR[r].get('on') else 0, AR[r].get('lvl'), int(time.time() - AR[r]['seen']) if AR[r].get('seen') else None] for r in AR},
     }
     lamps = {}
     for key in ('lamp_salon', 'kitchen_led', 'desk_light'):
