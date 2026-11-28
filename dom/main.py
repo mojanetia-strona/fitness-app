@@ -44,6 +44,11 @@ def get_file(name):
 def wifi(cfg):
     w = network.WLAN(network.STA_IF)
     w.active(True)
+    if is_aroma():
+        try:
+            w.config(txpower=8.5)  # C3 Super Mini: antena przy pełnej mocy gubi Wi-Fi (znana wada), niższa moc pomaga
+        except Exception as e:
+            print('txpower', e)
     if not w.isconnected():
         w.connect(cfg['wifi_ssid'], cfg['wifi_pass'])
         for i in range(40):
