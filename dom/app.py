@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.167'
+VERSION = '1.0.168'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -3136,8 +3136,11 @@ def tick_rules(sync, q):
             dev_set('salon_hum', 'sh_target', PLAN['rh_target'])
         dev_set('salon_pur', 'on', True)
         dev_set('salon_pur', 'sp_mode', 0, 'rano: salon oczyszczacz tryb dzienny')  # bieg ustawi reguła wg Qingpinga
-        dev_set('bed_hum', 'on', False, 'rano: wstalem, sypialnia nawilzacz off')  # 28.11
-        state['bed_pause'] = False
+        if is_weekend():
+            hum_on('bed_hum', 'b', 'rano: sypialnia nawilzacz on (weekend)')  # w weekend siedzę w sypialni; moc ustawi reguła wg RH
+        else:
+            dev_set('bed_hum', 'on', False, 'rano: wstalem, sypialnia nawilzacz off (w tygodniu sypialnia pusta)')  # 28.11
+            state['bed_pause'] = False
         trv_target('salon', PLAN['salon_day'])
         # sypialnia od razu po wstaniu: w tygodniu 17°C (stoi pusta do 18:00), w weekend 23°C
         state['bed_off_at'] = None
