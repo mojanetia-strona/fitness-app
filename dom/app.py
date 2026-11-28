@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.165'
+VERSION = '1.0.166'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -2816,7 +2816,8 @@ def day_key():
 
 SAVE_KEYS = ('eve_ret', 'ret18', 'morn', 'night_walks', 'asleep', 'bed_off_at', 'bed_eve', 'night_on', 'bed_pause', 'air', 'wl', 'sleep_at', 'robot_ev', 'robot_day', 'wiz_lvl',
              'cur_want', 'cur_why', 'cur_state', 'cur_day', 'boost_day', 'away_ev', 'away',
-             'rate_s', 'rate_b', 'heat_s', 'heat_b', 'ln_t', 'nl_seen', 'nl_eve', 'cozy', 'rates_s', 'rates_b', 'tout')
+             'rate_s', 'rate_b', 'heat_s', 'heat_b', 'ln_t', 'nl_seen', 'nl_eve', 'cozy', 'rates_s', 'rates_b', 'tout',
+             'no_wake', 'read_day')  # 28.11: „bez budzenia” i tryb czytania z panelu przeżywają restart (aktualizację) płytki
 
 
 def day_num():
