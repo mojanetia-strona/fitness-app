@@ -96,7 +96,8 @@ def update():
         if not remote or ver(remote) <= ver(local):
             return  # tylko nowsza wersja (raw GitHub bywa chwilę opóźniony)
         print('aktualizacja', local, '->', remote)
-        for f in FILES:
+        files = ('main.py', 'aroma.py') if is_aroma() else FILES  # płytka dyfuzora: tylko swoje pliki
+        for f in files:
             gc.collect()
             r = requests.get(RAW + f)
             if r.status_code != 200:
@@ -110,7 +111,7 @@ def update():
                     o.write(b)
             r.close()
         import os
-        for f in FILES:
+        for f in files:
             os.rename(f + '.new', f)
         for f in ('app.py', 'miio.py'):
             try:
@@ -142,6 +143,12 @@ def main():
         bluetooth.BLE().active(True)
     except Exception as e:
         print('ble init', e)
+    wd = None
+    if is_aroma():
+        try:
+            wd = machine.WDT(timeout=300000)  # zawieszone pobieranie przy starcie: po 5 min restart zamiast wiszenia
+        except Exception:
+            pass
     if not wifi(cfg):
         time.sleep(30)
         machine.reset()
@@ -151,7 +158,7 @@ def main():
     if is_aroma():
         get_file('aroma.py')
         import aroma
-        aroma.run()
+        aroma.run(wd)
         return
     if is_ucho():
         get_file('ucho.py')

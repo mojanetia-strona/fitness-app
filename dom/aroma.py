@@ -3,7 +3,7 @@
 # polecenia przychodzą z głównej płytki (UDP 8091), stan zgłasza co 60 s do głównej płytki (UDP 8090).
 import time, socket, machine, network, gc, json
 
-VERSION = 'aroma-2'
+VERSION = 'aroma-3'
 MAIN = ('192.168.100.35', 8090)
 PORT = 8091
 ROOMS = {'689dd27931e4': 's', '689dd2793214': 'b'}  # MAC płytki -> pokój (s = salon, b = sypialnia)
@@ -84,8 +84,12 @@ def handle(c):
     save()
 
 
-def run():
-    wd = machine.WDT(timeout=120000)
+def run(wd=None):
+    if wd is None:
+        try:
+            wd = machine.WDT(timeout=120000)
+        except Exception:
+            wd = None
     w = network.WLAN(network.STA_IF)
     mac = ''.join('%02x' % b for b in w.config('mac'))
     room = ROOMS.get(mac, '?')
@@ -95,6 +99,7 @@ def run():
     s.setblocking(False)
     boot = time.time()
     hb = 0
+    lost = [0]
     print('aroma start', VERSION, room, mac)
 
     def report(tag, extra=None):
@@ -111,7 +116,8 @@ def run():
             print('send', e)
 
     while True:
-        wd.feed()
+        if wd:
+            wd.feed()
         try:
             p, addr = s.recvfrom(300)
         except Exception:
@@ -123,10 +129,25 @@ def run():
                 report(b'AA', {'id': c.get('id'), 'c': c.get('c')})
             except Exception as e:
                 print('cmd', e)
-        if time.time() - hb > 60:
+        if time.time() - hb > 30:
             hb = time.time()
             report(b'AH')
             gc.collect()
-        if not w.isconnected() or time.time() - boot > 6 * 3600:
-            machine.reset()  # zgubione Wi-Fi albo co 6 h: restart (przy starcie sprawdza nową wersję)
+        if not w.isconnected():
+            # sypialnia ma słaby zasięg: krótkie zerwanie Wi-Fi nie restartuje płytki, tylko łączy ponownie
+            if not lost[0]:
+                lost[0] = time.time()
+                print('wifi zerwane, lacze ponownie')
+                try:
+                    w.connect()
+                except Exception:
+                    pass
+            elif time.time() - lost[0] > 90:
+                machine.reset()
+        elif lost[0]:
+            lost[0] = 0
+            hb = 0  # od razu zgłoś się głównej płytce
+            print('wifi wrocilo')
+        if time.time() - boot > 6 * 3600:
+            machine.reset()  # co 6 h restart (przy starcie sprawdza nową wersję)
         time.sleep_ms(50)
