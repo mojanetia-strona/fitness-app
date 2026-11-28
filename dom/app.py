@@ -22,7 +22,7 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.174'
+VERSION = '1.0.175'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
@@ -2187,6 +2187,7 @@ def fast_tick():
     try:
         http_tick()
         ucho_tick()
+        aroma_retry_tick()
         bath_tick()
         door_tick()
         target_tick()
@@ -2503,7 +2504,7 @@ def ucho_tick():
 # Płytka dyfuzora co 60 s zgłasza się (UDP 8090, 'AH' + JSON: pokój, wersja, on, poziom), dzięki temu znamy jej IP.
 # Polecenia: UDP 8091, 'AC' + JSON. 'want' = jak ma być; jeśli zgłoszony stan się nie zgadza, wysyłamy ponownie.
 AR = {'s': {}, 'b': {}}
-AR_N = [0]
+AR_N = [int(time.time()) % 100000 * 10]  # id poleceń: różne po restarcie (płytka dyfuzora odrzuca powtórzone id)
 
 
 def aroma_packet(p, ip):
@@ -2518,7 +2519,11 @@ def aroma_packet(p, ip):
     first = not a.get('seen')
     a['ip'], a['seen'], a['on'], a['lvl'] = ip, time.time(), d.get('on'), d.get('lvl')
     if first:
-        log('dyfuzor %s: w sieci (%s, %s, %s)' % (ROOM_NAME[r], ip, d.get('v'), 'on' if d.get('on') else 'off'))
+        log('dyfuzor %s: w sieci (%s, %s, %s, wifi %s dBm)' % (ROOM_NAME[r], ip, d.get('v'), 'on' if d.get('on') else 'off', d.get('rssi')))
+    pd = a.get('pend')
+    if p[:2] == b'AA' and pd and d.get('id') == pd['c'].get('id'):
+        log('dyfuzor %s: %s odebrane przez plytke (proba %d, wifi %s dBm)' % (ROOM_NAME[r], pd['c'].get('c'), pd['n'], d.get('rssi')))
+        a['pend'] = None
     if p[:2] == b'AH' and a.get('want') is not None and bool(a['on']) != a['want'] \
             and time.time() - a.get('sent', 0) > 50:
         aroma_send(r, {'c': 'on', 'l': PLAN.get('aroma_lvl_' + r, 1)} if a['want'] else {'c': 'off'})
@@ -2535,10 +2540,30 @@ def aroma_send(r, c):
         sk = UCHO['sock'] if UCHO['sock'] else socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sk.sendto(b'AC' + json.dumps(c).encode(), (a['ip'], 8091))
         a['sent'] = time.time()
+        a['pend'] = {'c': c, 'n': 1, 't': time.time()}
         return True
     except Exception as e:
         print('aroma send', e)
         return False
+
+
+def aroma_retry_tick():
+    """Słaby Wi-Fi gubi pojedyncze pakiety: bez potwierdzenia od płytki dyfuzora wysyłamy to samo (to samo id) do 4 razy."""
+    for r in AR:
+        a = AR[r]
+        pd = a.get('pend')
+        if not pd or time.time() - pd['t'] < 2.5:  # 'on' trwa ok. 2 s (włączenie + poziom)
+            continue
+        if pd['n'] >= 4:
+            log('dyfuzor %s: %s bez potwierdzenia po 4 probach (slaby Wi-Fi?)' % (ROOM_NAME[r], pd['c'].get('c')))
+            a['pend'] = None
+            continue
+        try:
+            UCHO['sock'].sendto(b'AC' + json.dumps(pd['c']).encode(), (a['ip'], 8091))
+        except Exception as e:
+            print('aroma retry', e)
+        pd['n'] += 1
+        pd['t'] = time.time()
 
 
 def aroma(r, on, why=''):

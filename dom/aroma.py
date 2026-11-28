@@ -3,7 +3,7 @@
 # polecenia przychodzą z głównej płytki (UDP 8091), stan zgłasza co 60 s do głównej płytki (UDP 8090).
 import time, socket, machine, network, gc, json
 
-VERSION = 'aroma-3'
+VERSION = 'aroma-4'
 MAIN = ('192.168.100.35', 8090)
 PORT = 8091
 ROOMS = {'689dd27931e4': 's', '689dd2793214': 'b'}  # MAC płytki -> pokój (s = salon, b = sypialnia)
@@ -100,6 +100,7 @@ def run(wd=None):
     boot = time.time()
     hb = 0
     lost = [0]
+    last = [None]
     print('aroma start', VERSION, room, mac)
 
     def report(tag, extra=None):
@@ -125,7 +126,9 @@ def run(wd=None):
         if p and p[:2] == b'AC' and addr[0] == MAIN[0]:
             try:
                 c = json.loads(p[2:])
-                handle(c)
+                if c.get('id') is None or c.get('id') != last[0]:  # powtórka tego samego polecenia (słaby Wi-Fi): tylko potwierdź
+                    last[0] = c.get('id')
+                    handle(c)
                 report(b'AA', {'id': c.get('id'), 'c': c.get('c')})
             except Exception as e:
                 print('cmd', e)
