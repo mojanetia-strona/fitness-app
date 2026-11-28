@@ -3,10 +3,10 @@
 # polecenia przychodzą z głównej płytki (UDP 8091), stan zgłasza co 60 s do głównej płytki (UDP 8090).
 import time, socket, machine, network, gc, json
 
-VERSION = 'aroma-1'
+VERSION = 'aroma-2'
 MAIN = ('192.168.100.35', 8090)
 PORT = 8091
-ROOMS = {'689dd2793214': 's', '689dd27931e4': 'b'}  # MAC płytki -> pokój (s = salon, b = sypialnia)
+ROOMS = {'689dd27931e4': 's', '689dd2793214': 'b'}  # MAC płytki -> pokój (s = salon, b = sypialnia)
 # kody pilota (NEC, adres 0x00), nagrane 28.11.2026
 ONOFF, LIGHT, AROMA = 0x45, 0x46, 0x47
 LEVELS = {1: 0x07, 2: 0x15, 3: 0x09, 4: 0x16, 5: 0x19, 6: 0x0D}
