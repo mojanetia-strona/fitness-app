@@ -2,21 +2,31 @@
 import time, json, machine, network, gc
 
 RAW = 'https://raw.githubusercontent.com/mojanetia-strona/fitness-app/main/dom/'
-FILES = ('miio.mpy', 'app.mpy', 'main.py', 'ucho.py')  # .mpy = skompilowane, mniej pamięci
+FILES = ('miio.mpy', 'app.mpy', 'main.py', 'ucho.py', 'aroma.py')  # .mpy = skompilowane, mniej pamięci
+
+
+def chip():
+    import os
+    try:
+        return os.uname().machine
+    except Exception:
+        return ''
+
+
+def is_aroma():
+    # ESP32-C3 Super Mini przy dyfuzorach zapachowych (od 28.11.2026): tylko nadaje podczerwień
+    return 'C3' in chip()
 
 
 def is_ucho():
-    # zapasowe ESP32 (nie S3) pracuje tylko jako ucho w łazience; główną płytką jest ESP32-S3
-    import os
-    try:
-        return 'S3' not in os.uname().machine
-    except Exception:
-        return False
+    # zapasowe ESP32 (nie S3, nie C3) pracuje tylko jako ucho w łazience; główną płytką jest ESP32-S3
+    m = chip()
+    return bool(m) and 'S3' not in m and 'C3' not in m
 
 
-def get_ucho():
+def get_file(name):
     try:
-        open('ucho.py').close()
+        open(name).close()
         return
     except OSError:
         pass
@@ -24,9 +34,9 @@ def get_ucho():
         import requests
     except ImportError:
         import urequests as requests
-    r = requests.get(RAW + 'ucho.py')
+    r = requests.get(RAW + name)
     if r.status_code == 200:
-        with open('ucho.py', 'w') as o:
+        with open(name, 'w') as o:
             o.write(r.text)
     r.close()
 
@@ -124,8 +134,10 @@ def main():
     if not cfg.get('wifi_pass'):
         print('uzupelnij config.json')
         return
-    # Bluetooth MUSI wystartować przed Wi-Fi i HTTPS, inaczej brakuje mu pamięci
+    # Bluetooth MUSI wystartować przed Wi-Fi i HTTPS, inaczej brakuje mu pamięci (płytka dyfuzora go nie używa)
     try:
+        if is_aroma():
+            raise Exception('bez BLE')
         import bluetooth
         bluetooth.BLE().active(True)
     except Exception as e:
@@ -136,8 +148,13 @@ def main():
     set_time()
     if cfg.get('auto_update', True):
         update()
+    if is_aroma():
+        get_file('aroma.py')
+        import aroma
+        aroma.run()
+        return
     if is_ucho():
-        get_ucho()
+        get_file('ucho.py')
         import ucho
         ucho.run()
         return

@@ -22,10 +22,13 @@ if hasattr(requests, 'request'):
 
     requests.request = _req_timeout
 
-VERSION = '1.0.168'
+VERSION = '1.0.169'
 
 # ---------- ustawienia domyślne (nadpisywane przez config.json -> "plan") ----------
 PLAN = {
+    'aroma': True,          # 28.11: dyfuzory zapachowe (płytki ESP32-C3 z podczerwienią) sterowane przez tę płytkę
+    'aroma_lvl_s': 1,       # poziom salon (1-6, 1 = najrzadziej)
+    'aroma_lvl_b': 1,       # poziom sypialnia
     'salon_day': 23.0,      # salon w dzień (wg Qingpinga; od 22.11 23°C, bo zimno)
     'salon_night': 18.0,    # salon w nocy (po odłożeniu telefonu)
     'bed_day': 17.0,        # sypialnia w dzień (tylko ochrona przed wychłodzeniem)
@@ -484,6 +487,8 @@ def remote_cmd(sync):
         curtains('open' if c == 'cur_open' else 'close', 'test')
     elif c == 'cur_info':
         state['cur_chk'] = 0
+    elif c in ('aroma_s_on', 'aroma_s_off', 'aroma_b_on', 'aroma_b_off'):
+        aroma(c[6], c.endswith('_on'), 'polecenie')
     elif c == 'wiz_learn':
         WS['learn'] = time.time() + 3600
         WS['inv'] = False
@@ -2452,6 +2457,9 @@ def ucho_tick():
             p, addr = UCHO['sock'].recvfrom(300)
         except Exception:
             break
+        if p[:2] in (b'AH', b'AA'):
+            aroma_packet(p, addr[0])
+            continue
         if addr[0] != PLAN.get('ucho_ip', addr[0]):
             continue
         if p[:2] == b'UH':
@@ -2465,6 +2473,59 @@ def ucho_tick():
             UCHO['seen'] = time.time()
             UCHO['n'] += 1
             ble_irq(5, (0, p[2:8], 0, 0, p[8:]))  # jak własny Bluetooth: te same reguły, jedna decyzja
+
+
+
+# ---------- dyfuzory zapachowe (28.11.2026): płytki ESP32-C3 udają pilota na podczerwień ----------
+# Płytka dyfuzora co 60 s zgłasza się (UDP 8090, 'AH' + JSON: pokój, wersja, on, poziom), dzięki temu znamy jej IP.
+# Polecenia: UDP 8091, 'AC' + JSON. 'want' = jak ma być; jeśli zgłoszony stan się nie zgadza, wysyłamy ponownie.
+AR = {'s': {}, 'b': {}}
+AR_N = [0]
+
+
+def aroma_packet(p, ip):
+    try:
+        d = json.loads(p[2:])
+    except Exception:
+        return
+    r = d.get('r')
+    if r not in AR:
+        return
+    a = AR[r]
+    first = not a.get('seen')
+    a['ip'], a['seen'], a['on'], a['lvl'] = ip, time.time(), d.get('on'), d.get('lvl')
+    if first:
+        log('dyfuzor %s: w sieci (%s, %s, %s)' % (ROOM_NAME[r], ip, d.get('v'), 'on' if d.get('on') else 'off'))
+    if p[:2] == b'AH' and a.get('want') is not None and bool(a['on']) != a['want'] \
+            and time.time() - a.get('sent', 0) > 50:
+        aroma_send(r, {'c': 'on', 'l': PLAN.get('aroma_lvl_' + r, 1)} if a['want'] else {'c': 'off'})
+
+
+def aroma_send(r, c):
+    a = AR[r]
+    if not a.get('ip'):
+        return False
+    try:
+        import socket
+        AR_N[0] += 1
+        c['id'] = AR_N[0]
+        sk = UCHO['sock'] if UCHO['sock'] else socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sk.sendto(b'AC' + json.dumps(c).encode(), (a['ip'], 8091))
+        a['sent'] = time.time()
+        return True
+    except Exception as e:
+        print('aroma send', e)
+        return False
+
+
+def aroma(r, on, why=''):
+    """Dyfuzor w pokoju r ('s' salon, 'b' sypialnia): on=True włącz na poziomie z PLAN, False wyłącz."""
+    if not PLAN.get('aroma'):
+        return
+    AR[r]['want'] = on
+    ok = aroma_send(r, {'c': 'on', 'l': PLAN.get('aroma_lvl_' + r, 1)} if on else {'c': 'off'})
+    log('dyfuzor %s %s%s%s' % (ROOM_NAME[r], 'on' if on else 'off', (', ' + why) if why else '',
+                               '' if ok else ' (plytka jeszcze sie nie zglosila, wysle po zgloszeniu)'))
 
 
 BLE = [None]
@@ -2987,6 +3048,8 @@ def tick_rules(sync, q):
                     if PLAN.get(key):
                         plug_set(PLAN[key], False, key + ' off')
                 log('wyjscie z domu: zarowki off, potem wszystko off, grzejniki %s' % PLAN['away_temp'])
+                aroma('s', False, 'wyjscie')
+                aroma('b', False, 'wyjscie')
                 for d in ('bed_hum', 'salon_hum', 'salon_pur'):
                     dev_set(d, 'on', False)
             elif not asleep:
@@ -3006,8 +3069,10 @@ def tick_rules(sync, q):
                     plug_set(PLAN['kitchen_led'], False, 'kitchen_led off (wieczor)')
                 hum_on('salon_hum', 's', None)
                 hum_on('salon_pur', 's', None)
+                aroma('s', True, 'powrot')
                 if bed_ok:
                     hum_on('bed_hum', 'b', None)
+                    aroma('b', True, 'powrot')
                     state['bed_eve'] = day_key()
             if not state['away'] and dev.get('robot') and PLAN.get('robot_dock'):
                 # wracam: robot na stację, nawet jeśli nie skończył (dawne „Zadokuj Robota”)
@@ -3048,6 +3113,8 @@ def tick_rules(sync, q):
             state['wl'] = None
             log('lampka sypialnia off' if wiz({'state': False}) is not None else 'lampka sypialnia nie odpowiada (%s)' % state.get('wiz_err'))
         dev_set('bed_hum', 'on', False, 'sypialnia nawilzacz off')
+        aroma('s', False, 'noc')
+        aroma('b', False, 'noc')
         # salon na noc: nawilżacz i oczyszczacz zostają włączone, ale w trybie nocnym (cicho)
         dev_set('salon_hum', 'on', True)
         dev_set('salon_hum', 'sh_mode', 1, 'salon nawilzacz tryb nocny')
@@ -3136,6 +3203,8 @@ def tick_rules(sync, q):
             dev_set('salon_hum', 'sh_target', PLAN['rh_target'])
         dev_set('salon_pur', 'on', True)
         dev_set('salon_pur', 'sp_mode', 0, 'rano: salon oczyszczacz tryb dzienny')  # bieg ustawi reguła wg Qingpinga
+        aroma('s', True, 'rano')
+        aroma('b', bool(is_weekend()), 'rano')
         if is_weekend():
             hum_on('bed_hum', 'b', 'rano: sypialnia nawilzacz on (weekend)')  # w weekend siedzę w sypialni; moc ustawi reguła wg RH
         else:
@@ -3160,6 +3229,7 @@ def tick_rules(sync, q):
         log('wieczor: jestem w domu, sypialnia %s i nawilzacz' % PLAN['bed_home'])
         trv_target('bed', PLAN['bed_home'])
         hum_on('bed_hum', 'b', None)
+        aroma('b', True, 'wieczor, jestem w domu')
 
     # --- 21:00: zasłony w sypialni zasuwane (wieczorem dziwnie siedzieć przy odsłoniętych) ---
     if not nl_mode() and m >= PLAN['night_from'] and state.get('cur_state') != 'close' and once('cur_eve'):
